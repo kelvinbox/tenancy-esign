@@ -9,7 +9,7 @@ function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) return e.name === 'node_modules' || e.name === '.git' ? [] : walk(p);
-    return /\.(js|html|css|json)$/.test(e.name) ? [p] : [];
+    return /\.(js|gs|html|css|json)$/.test(e.name) ? [p] : [];
   });
 }
 

@@ -103,6 +103,8 @@ Each signer gets 3 emails (invite, code and signed copy). The owner gets 1 notic
 
 ## Hooking it into Tenant Management (replacing DocHub)
 
+**Start here:** `integration/HANDOVER.md` has the full step-by-step plan, and `integration/esign-provider.gs` is the tested drop-in file for the Tenant Management Apps Script project.
+
 Every action is a `POST` to the web app URL with a JSON body and `Content-Type: text/plain`. From the Tenant Management Apps Script use `UrlFetchApp`; `exampleSendFromTenantManagement_()` in `Code.js` shows how.
 
 | DocHub step today | Replacement |
@@ -129,6 +131,7 @@ docs/                    static site (GitHub Pages root)
   js/demo-backend.js     in-browser backend for demo mode
   js/config.js           demo vs live switch
 apps-script/             live backend (Core.js and Template.js are generated: npm run build)
+integration/             drop-in file for Tenant Management (esign-provider.gs) and HANDOVER.md
 test/                    Node tests, including the Apps Script code run against fake Google services
 tools/                   build and local server
 ```
@@ -136,7 +139,7 @@ tools/                   build and local server
 The same `core.js` runs in three places: the browser demo, Apps Script and the Node tests. The rules can't drift apart between them. Source files are pure ASCII (non-ASCII is written as `\u` escapes), following the main project's rule, and a test enforces it.
 
 ```bash
-npm test        # 30 tests: engine, audit chain, tampering, validation, landlord signers, changes of tenants, Apps Script adapter, ASCII
+npm test        # 35 tests: engine, audit chain, tampering, validation, landlord signers, changes of tenants, Apps Script adapter, ASCII
 npm run build   # after editing docs/js/core.js or agreement-template.js
 ```
 
