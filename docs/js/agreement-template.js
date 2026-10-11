@@ -8,7 +8,8 @@
  * editing this file never changes an agreement that is already out for signing.
  *
  * Block types: p (paragraph), h (sub-heading), kv (label/value rows), list (numbered),
- * landlord, tenants, signatures. Any block, kv row (3rd element) or list item can carry
+ * landlord, tenants, signatures. A list item {each: 'Field'} becomes one numbered item per line of that field.
+ * Any block, kv row (3rd element) or list item can carry
  * {when: 'Field'} or {unless: 'Field'}.
  *
  * IMPORTANT: this wording is a plain-English prototype written for testing. It has not been
@@ -23,7 +24,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.1.0',
+    version: '1.2.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -103,7 +104,6 @@ var ESignTemplates = (function () {
             'maintain the premises in a reasonable state of repair, having regard to their age and character, and comply with building, health and safety laws that apply to them',
             'let the tenant have quiet enjoyment of the premises',
             'give at least 48 hours\' notice before an inspection (no more than one inspection every 4 weeks), and at least 24 hours\' notice before entering to do repairs or maintenance, entering only between 8am and 7pm',
-            'not unreasonably refuse a request from the tenant to make a minor change to the premises',
             'tell the tenant in writing of any change to the landlord\'s name, contact details or address for service'
           ]
         }]
@@ -119,7 +119,7 @@ var ESignTemplates = (function () {
             'not intentionally or carelessly damage the premises, or let anyone else do so',
             'not use the premises for any unlawful purpose',
             'not disturb the neighbours\' peace, comfort or privacy',
-            'not make changes to the premises without the landlord\'s written consent (consent to a minor change must not be unreasonably refused)',
+            'not make changes to the premises without the landlord\'s written consent',
             'not let more than the maximum number of occupants live at the premises',
             'at the end of the tenancy, leave the premises reasonably clean and tidy, remove all their belongings and rubbish, and return all keys and remotes'
           ]
@@ -129,7 +129,11 @@ var ESignTemplates = (function () {
         id: 'ending',
         heading: '7. Ending the tenancy',
         blocks: [
-          { type: 'p', text: 'The tenancy can only be ended as the Act allows. For example, a tenant in a periodic tenancy can end it by giving at least 28 days\' written notice. The landlord can give notice only on the grounds, and with the notice periods, set out in the Act.' }
+          { type: 'p', when: 'IsFixedTerm', text: 'This is a fixed-term tenancy ending on {{TenancyEnd}}. The landlord or the tenant can end it on that date by giving the other written notice no more than 90 days and no less than 21 days before the end date. No reason is needed.' },
+          { type: 'p', when: 'IsFixedTerm', text: 'If neither gives that notice, and the landlord and tenant don\'t agree otherwise, the tenancy automatically becomes a periodic tenancy when the fixed term ends, on the same terms.' },
+          { type: 'p', when: 'IsFixedTerm', text: 'Neither the landlord nor the tenant can end a fixed-term tenancy early on their own. It can end before {{TenancyEnd}} only if the landlord and tenant agree in writing, or if the Tenancy Tribunal orders it.' },
+          { type: 'p', text: 'A periodic tenancy (including one that follows the fixed term) can be ended by the tenant giving at least 21 days\' written notice, or by the landlord giving at least 90 days\' written notice. The landlord can give 42 days\' notice only on the specific grounds the Act sets out, such as the owner or a family member moving in, or the property being sold with vacant possession.' },
+          { type: 'p', text: 'Notice must be in writing and given as the Act requires. The Tenancy Tribunal can also end a tenancy in the situations the Act allows.' }
         ]
       },
       {
@@ -140,7 +144,7 @@ var ESignTemplates = (function () {
             type: 'list', items: [
               'Smoking is not allowed inside the premises.',
               'Pets: {{PetsText}}',
-              { text: '{{AdditionalTerms}}', when: 'HasAdditionalTerms' }
+              { each: 'AdditionalTerms', when: 'HasAdditionalTerms' }
             ]
           },
           { type: 'p', text: 'Any term in this section that is inconsistent with the Act has no effect.' }

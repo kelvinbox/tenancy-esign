@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.4';
+  var VERSION = '0.3.5';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -656,6 +656,9 @@ var ESign = (function () {
         }).join('') + '</table>';
       case 'list':
         return '<ol class="terms">' + b.items.filter(function (it) { return cond(it, f); }).map(function (it) {
+          // {each: 'Field'}: one numbered item per line of the field (e.g. the property's additional terms)
+          if (it && it.each) return String(f[it.each] || '').split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean)
+            .map(function (x) { return '<li>' + val(x, mode) + '</li>'; }).join('');
           return '<li>' + fillText(typeof it === 'string' ? it : it.text, f, mode) + '</li>';
         }).join('') + '</ol>';
       case 'landlord':

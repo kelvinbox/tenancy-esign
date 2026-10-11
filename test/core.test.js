@@ -291,3 +291,27 @@ test('insurance statement about tenant liability appears only when the property 
   assert.ok(none.html.indexOf('There is insurance covering this rental property') < 0, 'hidden when not insured');
   assert.ok(statement);
 });
+
+test('template 1.2.0: numbered additional terms, sections 5-7 wording', () => {
+  const b = memoryBackend();
+  const terms = Object.assign({}, sampleInput().terms, { additionalTerms: 'No smoking anywhere on the property.\nGarden to be kept tidy.\n\n  Bins out on Tuesday nights.  ' });
+  const html = b.call({ action: 'admin.preview', input: sampleInput({ terms }) }).html;
+  const other = html.slice(html.indexOf('8. Other terms'), html.indexOf('9. Signing electronically'));
+  const items = (other.match(/<li>/g) || []).length;
+  assert.equal(items, 5, 'smoking + pets + 3 additional terms, each its own numbered item');
+  assert.ok(other.indexOf('Garden to be kept tidy.') > 0 && other.indexOf('Bins out on Tuesday nights.') > 0);
+  assert.ok(html.indexOf('minor change') < 0, 'minor-change wording removed from sections 5 and 6');
+  assert.ok(html.indexOf('without the landlord&#39;s written consent</li>') > 0 || html.indexOf('without the landlord&#39;s written consent<') > 0, 'section 6 item 7 ends after consent');
+  const ending = html.slice(html.indexOf('7. Ending the tenancy'), html.indexOf('8. Other terms'));
+  assert.ok(/no more than 90 days and no less than 21 days before the end date/.test(ending), 'fixed-term notice window');
+  assert.ok(/automatically becomes a periodic tenancy/.test(ending));
+  assert.ok(/at least 21 days&#39; written notice/.test(ending) && ending.indexOf('28 days') < 0, 'periodic tenant notice is 21 days');
+  // periodic agreements leave the fixed-term paragraphs out
+  const per = b.call({ action: 'admin.preview', input: sampleInput({ terms: Object.assign({}, sampleInput().terms, { endDate: '' }) }) }).html;
+  const perEnding = per.slice(per.indexOf('7. Ending the tenancy'), per.indexOf('8. Other terms'));
+  assert.ok(perEnding.indexOf('fixed-term tenancy ending on') < 0 && /at least 21 days/.test(perEnding));
+  // no additional terms: no empty item
+  const none = b.call({ action: 'admin.preview', input: sampleInput() }).html;
+  const noneOther = none.slice(none.indexOf('8. Other terms'), none.indexOf('9. Signing electronically'));
+  assert.equal((noneOther.match(/<li>/g) || []).length, 2);
+});
