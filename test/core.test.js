@@ -391,3 +391,22 @@ test('unit title: the body corporate rules are attached, opened from the signing
   assert.equal(done.attachments.length, 2, 'signed copy + body corporate rules');
   assert.ok(b.call({ action: 'admin.get', id: res.agreement.id }).terms.bodyCorporateRules.sha256.length === 64);
 });
+
+test('second landlord signer: mobile on the agreement; email only when allowed, but still used to sign', () => {
+  const signers = (show) => [{ name: 'Sam Owner', email: 'landlord@example.com', mobile: '021 000 0001' },
+    { name: 'Pat Owner', email: 'pat@example.com', mobile: '021 000 0002', showEmail: show }];
+  const hidden = memoryBackend().call({ action: 'admin.preview', input: sampleInput({ landlordSigners: signers(false) }) }).html;
+  const party = hidden.slice(hidden.indexOf('1. The parties'), hidden.indexOf('2. The premises'));
+  assert.ok(party.indexOf('Pat Owner') > 0 && party.indexOf('021 000 0002') > 0, 'name and mobile shown');
+  assert.ok(party.indexOf('pat@example.com') < 0, 'email kept off the agreement');
+  const shown = memoryBackend().call({ action: 'admin.preview', input: sampleInput({ landlordSigners: signers(true) }) }).html;
+  const party2 = shown.slice(shown.indexOf('1. The parties'), shown.indexOf('2. The premises'));
+  assert.ok(party2.indexOf('pat@example.com') > 0, 'email shown when allowed');
+  // still invited by email to sign
+  const b = memoryBackend();
+  b.call({ action: 'admin.create', input: sampleInput({ landlordSigners: signers(false) }) });
+  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')));
+  signAs(b, b.tokenFrom(b.lastEmail('landlord@example.com', 'invite')));
+  assert.ok(b.lastEmail('pat@example.com', 'invite'), 'second signer gets their signing link');
+});

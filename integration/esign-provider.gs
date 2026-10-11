@@ -161,7 +161,8 @@ function esignTenantFromApplicant_(a) {
 function esignLandlordSigners_(landlord) {
   var out = [{ name: landlord.signerName || landlord.name, email: landlord.email, mobile: landlord.mobile || '' }];
   if (landlord.signer2Name && landlord.signer2Email) {
-    out.push({ name: landlord.signer2Name, email: landlord.signer2Email, mobile: landlord.signer2Mobile || '' });
+    out.push({ name: landlord.signer2Name, email: landlord.signer2Email, mobile: landlord.signer2Mobile || '',
+               showEmail: landlord.signer2EmailOnAgreement === undefined ? true : !!landlord.signer2EmailOnAgreement });   // still used to sign either way
   }
   return out;
 }

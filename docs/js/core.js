@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.8';
+  var VERSION = '0.3.9';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -275,6 +275,7 @@ var ESign = (function () {
     if (ls.length > MAX_LANDLORD_SIGNERS) errors.push('At most ' + MAX_LANDLORD_SIGNERS + ' people can sign for the landlord.');
     v.landlordSigners = ls.slice(0, MAX_LANDLORD_SIGNERS).map(function (s, i) {
       var sv = { name: str(s.name), email: normEmail(s.email), mobile: str(s.mobile) };
+      if (i > 0) sv.showEmail = s.showEmail !== false;   // a second signer may keep their email off the agreement (it is still used to sign)
       var who = ls.length > 1 ? 'Landlord signer ' + (i + 1) : 'The person signing for the landlord';
       if (!sv.name) errors.push(who + ' needs a name.');
       if (!isEmail(sv.email)) errors.push(who + ' (' + (sv.name || 'no name') + ') needs a valid email address.');
@@ -282,6 +283,8 @@ var ESign = (function () {
     });
     if (!v.landlord.email && v.landlordSigners.length) v.landlord.email = v.landlordSigners[0].email;
     v.landlord.signerName = v.landlordSigners.map(function (s) { return s.name; }).join(' and ');
+    var s2 = v.landlordSigners[1];
+    if (s2) v.landlord.secondSigner = { name: s2.name, mobile: s2.mobile, email: s2.showEmail ? s2.email : '' };
 
     if (!v.propertyAddress) errors.push('Enter the rental address.');
     if (!v.landlord.name) errors.push('Enter the landlord\'s name.');
@@ -543,6 +546,9 @@ var ESign = (function () {
       LandlordEmail: L.email,
       LandlordPhone: L.phone || '-',
       LandlordMobile: L.mobile || '-',
+      LandlordSigner2Name: L.secondSigner ? L.secondSigner.name : '',
+      LandlordSigner2Mobile: L.secondSigner ? L.secondSigner.mobile : '',
+      LandlordSigner2Email: L.secondSigner ? L.secondSigner.email : '',
       RentPerWeek: t.rentPerWeek,
       BondAmount: t.bond,
       RentPaymentDetails: t.rentPaymentDetails,
@@ -691,7 +697,11 @@ var ESign = (function () {
           kvRow('Address for service', fillText('{{LandlordAddress}}', f, mode)) +
           kvRow('Email', fillText('{{LandlordEmail}}', f, mode) + AFS_NOTE) +
           kvRow('Phone', fillText('{{LandlordPhone}}', f, mode)) +
-          kvRow('Mobile', fillText('{{LandlordMobile}}', f, mode)) + '</table></div>';
+          kvRow('Mobile', fillText('{{LandlordMobile}}', f, mode)) +
+          (f.LandlordSigner2Name ? kvRow('Second signer', fillText('{{LandlordSigner2Name}}', f, mode)) +
+            (f.LandlordSigner2Mobile ? kvRow('Second signer mobile', fillText('{{LandlordSigner2Mobile}}', f, mode)) : '') +
+            (f.LandlordSigner2Email ? kvRow('Second signer email', fillText('{{LandlordSigner2Email}}', f, mode) + AFS_NOTE) : '') : '') +
+          '</table></div>';
       case 'tenants':
         return env.signers.filter(function (s) { return s.kind === 'tenant'; })
           .map(function (s) { return renderParty(s, env, mode); }).join('');
