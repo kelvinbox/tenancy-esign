@@ -23,7 +23,7 @@
 
 var ESIGN_PROVIDER = 'esign';
 var DOCHUB_PROVIDER = 'dochub';
-var ESIGN_SAFE_TO_RETRY = { 'admin.get': 1, 'admin.list': 1, 'admin.download': 1, 'admin.summary': 1, 'admin.preview': 1, 'admin.previewVariation': 1 };
+var ESIGN_SAFE_TO_RETRY = { 'admin.get': 1, 'admin.list': 1, 'admin.download': 1, 'admin.summary': 1, 'admin.preview': 1, 'admin.previewVariation': 1, 'admin.purge': 1 };
 
 /* =====================================================================
  * Transport
@@ -307,6 +307,11 @@ function esignTenancyDraft_(a, ctx) {
 /* =====================================================================
  * Actions
  * ===================================================================== */
+
+/** Permanently removes an agreement, its change-of-tenants variations and their files (clearing test data). {deleted: [ids]} */
+function esignPurgeAgreement_(requestId, actor) {
+  return esignCall_('admin.purge', { id: requestId }, actor);
+}
 
 /** Sends an agreement for signing. Returns {agreement, warnings} for Tenant Management to save. */
 function esignSendAgreement_(ctx, actor) {

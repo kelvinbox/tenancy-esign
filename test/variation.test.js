@@ -213,3 +213,18 @@ test('preview of a change renders without sending anything', () => {
   assert.equal(b.call({ action: 'admin.get', id }).tenancy.canChange, true);
   assert.equal(ESign.roleLabel('LeavingTenant1'), 'Leaving tenant 1');
 });
+
+test('admin.purge removes the agreement, its change-of-tenants variations, their audit trails and files; others untouched', () => {
+  const { b, id } = signedOriginal();
+  const other = b.call({ action: 'admin.create', input: sampleInput({ propertyAddress: '2 Other Street, Dunedin' }) }).agreement.id;
+  const vid = b.call({ action: 'admin.createVariation', input: { parentId: id, effectiveDate: '2026-12-01', add: [riley], bondArrangement: 'Top-up.', bondTotal: '2600' } }).agreement.id;
+  // purging by either the original or the variation id removes the whole chain
+  const r = b.call({ action: 'admin.purge', id: vid });
+  assert.deepEqual(r.deleted.sort(), [id, vid].sort());
+  assert.equal(b.db.envelopes[id], undefined); assert.equal(b.db.envelopes[vid], undefined);
+  assert.equal(b.db.audit[id], undefined, 'audit trail removed');
+  assert.deepEqual((b.db.trashed || []).sort(), [id, vid].sort(), 'their file folders trashed');
+  assert.ok(b.db.envelopes[other], 'another tenancy is untouched');
+  assert.throws(() => b.call({ action: 'admin.get', id }), /wasn't found/);
+  assert.deepEqual(b.call({ action: 'admin.purge', id }).deleted, [], 'repeating is harmless');
+});

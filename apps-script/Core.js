@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.11';
+  var VERSION = '0.3.12';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -1936,6 +1936,21 @@ var ESign = (function () {
       get: function (id) { return adminView(loadEnv(id)); },
       issueLink: issueLink,
       cancel: cancel,
+      /**
+       * Permanently removes a tenancy's records: the agreement, every change-of-tenants variation of it, their audit trails
+       * and their files (signatures, signed PDFs, attachments). For clearing test data; the caller confirms first.
+       */
+      purge: function (id, actor) {
+        var env = store.getEnvelope(str(id));
+        if (!env) return { deleted: [] };
+        var tid = env.tenancyId || env.id;
+        var all = store.listEnvelopes().filter(function (e) { return (e.tenancyId || e.id) === tid; });
+        all.forEach(function (e) {
+          if (svc.trashFiles) { try { svc.trashFiles(e.id); } catch (x) {} }
+          store.deleteEnvelope(e.id);
+        });
+        return { deleted: all.map(function (e) { return e.id; }), by: actor || 'landlord' };
+      },
       adminDownload: function (id) {
         var env = loadEnv(id);
         if (!env.final) fail('The signed document is created once everyone has signed.');
@@ -2002,6 +2017,7 @@ var ESign = (function () {
       case 'admin.issueLink': return engine.issueLink(req.id, req.signerId, req.channel, actor);
       case 'admin.cancel': return engine.cancel(req.id, req.reason, actor);
       case 'admin.download': return engine.adminDownload(req.id);
+      case 'admin.purge': return engine.purge(req.id, actor);
       case 'admin.previewVariation': return engine.previewVariation(req.input);
       case 'admin.createVariation': return engine.createVariation(req.input, actor);
       case 'admin.summary': return engine.tenancySummary(req.id);

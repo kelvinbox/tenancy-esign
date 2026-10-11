@@ -163,6 +163,16 @@ function sheetStore_(p) {
         all.push({ row: agr.getLastRow(), env: copy(env) });
       }
     },
+    deleteEnvelope: function (id) {   // the agreement row and its audit rows
+      var all = readAll(), f = all.filter(function (x) { return x.env.id === id; })[0];
+      if (f) agr.deleteRow(f.row);
+      cache = null;
+      var n = aud.getLastRow();
+      if (n >= 2) {
+        var ids = aud.getRange(2, 1, n - 1, 1).getValues();
+        for (var i = ids.length - 1; i >= 0; i--) if (ids[i][0] === id) aud.deleteRow(i + 2);
+      }
+    },
     appendAudit: function (ev) {
       aud.appendRow([ev.envelopeId, ev.seq, "'" + ev.at, ev.type, "'" + ev.actor, ev.hash, "'" + JSON.stringify(ev)]);
     },
@@ -236,6 +246,10 @@ function services_(p) {
       var bytes = Utilities.base64Decode(base64);
       var file = envFolder(envId).createFile(Utilities.newBlob(bytes, mime || 'application/pdf', name));
       return { ref: file.getId(), sha256: sha(bytes) };
+    },
+    trashFiles: function (envId) {   // the agreement's Drive folder (signatures, signed PDF, attachments) goes to the bin
+      var it = rootFolder().getFoldersByName(envId);
+      while (it.hasNext()) it.next().setTrashed(true);
     },
     loadImage: function (ref) {
       return 'data:image/png;base64,' + Utilities.base64Encode(DriveApp.getFileById(ref).getBlob().getBytes());

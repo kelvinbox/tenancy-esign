@@ -23,7 +23,8 @@ var DemoBackend = (function () {
     saveEnvelope: function (env) { var db = load(); db.envelopes[env.id] = clone(env); save(db); },
     listEnvelopes: function () { var db = load(); return Object.keys(db.envelopes).map(function (k) { return db.envelopes[k]; }); },
     appendAudit: function (ev) { var db = load(); (db.audit[ev.envelopeId] = db.audit[ev.envelopeId] || []).push(clone(ev)); save(db); },
-    listAudit: function (id) { return load().audit[id] || []; }
+    listAudit: function (id) { return load().audit[id] || []; },
+    deleteEnvelope: function (id) { var db = load(); delete db.envelopes[id]; delete db.audit[id]; save(db); }
   };
 
   function randomString(n) {

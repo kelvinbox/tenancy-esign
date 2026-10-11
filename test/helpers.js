@@ -15,7 +15,8 @@ function memoryBackend(opts) {
     saveEnvelope: env => { db.envelopes[env.id] = JSON.parse(JSON.stringify(env)); },
     listEnvelopes: () => Object.values(db.envelopes).map(e => JSON.parse(JSON.stringify(e))),
     appendAudit: ev => { (db.audit[ev.envelopeId] = db.audit[ev.envelopeId] || []).push(JSON.parse(JSON.stringify(ev))); },
-    listAudit: id => JSON.parse(JSON.stringify(db.audit[id] || []))
+    listAudit: id => JSON.parse(JSON.stringify(db.audit[id] || [])),
+    deleteEnvelope: id => { delete db.envelopes[id]; delete db.audit[id]; }
   };
   const svc = {
     config: Object.assign({ signUrl: 'https://example.test/sign.html', verifyUrl: 'https://example.test/verify.html', ownerName: 'Sam Owner', ownerEmail: 'owner@example.com' }, opts.config),
@@ -37,6 +38,7 @@ function memoryBackend(opts) {
       db.files[ref] = { name, mime, base64 };
       return { ref, sha256: crypto.createHash('sha256').update(Buffer.from(base64, 'base64')).digest('hex') };
     },
+    trashFiles: envId => { (db.trashed = db.trashed || []).push(envId); },
     loadImage: ref => db.images[ref],
     storeFinal: (env, html) => {
       const ref = 'fin-' + env.id;
