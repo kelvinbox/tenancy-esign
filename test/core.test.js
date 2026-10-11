@@ -345,6 +345,7 @@ test('template 1.5.0: Tenancy Services comparison wording', () => {
   has('pay for the electricity, telephone and internet services they use');
   has('Privacy Act 2020');
   has('declare that the information in the insulation and healthy homes statements in section 4');
+  has('and that I/we comply with the healthy homes standards as required by either section 45(1)(bb) or 66I(1)(bb) of the Act.');
   assert.ok(html.indexOf('bottled gas') < 0 && html.indexOf('body corporate rules') < 0, 'gas and unit title wording only when they apply');
   const gas = memoryBackend().call({ action: 'admin.preview', input: sampleInput({ terms: Object.assign({}, sampleInput().terms, { bottledGas: true }) }) }).html;
   assert.ok(gas.indexOf('pay for the bottled gas they use (refills). The landlord pays the gas bottle hire') > 0);

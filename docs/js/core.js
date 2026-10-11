@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.9';
+  var VERSION = '0.3.10';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -40,7 +40,7 @@ var ESign = (function () {
 
   /** The landlord's declaration that the insulation and healthy homes statements are true (templates with a declaration block). */
   function declarationText(env) {
-    return 'I/we, ' + str(env.landlord && env.landlord.name) + ', declare that the information in the insulation and healthy homes statements in section 4 of this agreement is true and correct as at the date of signing.';
+    return 'I/we, ' + str(env.landlord && env.landlord.name) + ', declare that the information in the insulation and healthy homes statements in section 4 of this agreement is true and correct as at the date of signing, and that I/we comply with the healthy homes standards as required by either section 45(1)(bb) or 66I(1)(bb) of the Act.';
   }
   function hasDeclarationBlock(env) {
     return !!(env.template && (env.template.sections || []).some(function (sec) { return (sec.blocks || []).some(function (b) { return b.type === 'declaration'; }); }));
