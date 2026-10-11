@@ -266,3 +266,18 @@ test('editing the template file does not change an agreement already sent', () =
     assert.ok(!view.document.intro.includes('Changed wording'));
   } finally { tpl.intro = saved; }
 });
+
+test('messages and the signing page name the agreement\'s own landlord, not OWNER_NAME', () => {
+  const b = memoryBackend();
+  const input = sampleInput({ landlord: Object.assign({}, sampleInput().landlord, { name: 'Les and Jennifer Box' }) });
+  const res = b.call({ action: 'admin.create', input, actor: 'Sam' });
+  const invite = b.lastEmail('mia@example.com', 'invite');
+  assert.match(invite.text, /^Hi Mia,\n\nLes and Jennifer Box has sent you /);
+  assert.match(invite.text, /Thanks,\nLes and Jennifer Box$/);
+  assert.ok(invite.html.indexOf('Les and Jennifer Box has sent you') >= 0);
+  assert.ok(invite.text.indexOf('Sam Owner') < 0, 'OWNER_NAME is not used in the message');
+  const view = b.call({ action: 'sign.open', token: b.tokenFrom(invite) });
+  assert.equal(view.ownerName, 'Les and Jennifer Box');
+  const sms = b.call({ action: 'admin.issueLink', id: res.agreement.id, signerId: view.me.id, channel: 'sms' });
+  assert.match(sms.smsBody, / - Les and Jennifer Box$/);
+});

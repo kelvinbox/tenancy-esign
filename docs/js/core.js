@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.1';
+  var VERSION = '0.3.2';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -968,6 +968,8 @@ var ESign = (function () {
     var MAX_CODE_ATTEMPTS = 5;
     var MAX_CODES_PER_HOUR = 5;
     var ownerName = cfg.ownerName || 'The landlord';
+    // the name people see: the agreement's own landlord (falls back to OWNER_NAME). Email sender name stays OWNER_NAME.
+    function senderName(env) { return (env && env.landlord && String(env.landlord.name || '').trim()) || ownerName; }
 
     function now() { return svc.now(); }
     function iso() { return now().toISOString(); }
@@ -1126,14 +1128,14 @@ var ESign = (function () {
       var first = signerDetails(s).name.split(' ')[0];
       var exp = fmt(env.expiresAt);
       var subject = 'Please sign: ' + docShort(env) + ' for ' + env.propertyAddress;
-      var text = 'Hi ' + first + ',\n\n' + ownerName + ' has sent you ' + docPhrase(env) + ' for ' + env.propertyAddress +
+      var text = 'Hi ' + first + ',\n\n' + senderName(env) + ' has sent you ' + docPhrase(env) + ' for ' + env.propertyAddress +
         ' to read and sign. It takes about 5 minutes and works on your phone.\n\nOpen your personal signing link:\n' + link +
-        '\n\nThe link is just for you, so please don\'t forward it. It expires on ' + exp + '.\n\nThanks,\n' + ownerName;
-      var html = wrapHtml('<p>Hi ' + esc(first) + ',</p><p>' + esc(ownerName) + ' has sent you ' + docPhrase(env) + ' for <b>' +
+        '\n\nThe link is just for you, so please don\'t forward it. It expires on ' + exp + '.\n\nThanks,\n' + senderName(env);
+      var html = wrapHtml('<p>Hi ' + esc(first) + ',</p><p>' + esc(senderName(env)) + ' has sent you ' + docPhrase(env) + ' for <b>' +
         esc(env.propertyAddress) + '</b> to read and sign. It takes about 5 minutes and works on your phone.</p>' +
         button(link, 'Review and sign') +
         '<p style="color:#555;font-size:14px">This link is just for you, so please don\'t forward it. It expires on ' + esc(exp) + '.</p>' +
-        '<p>Thanks,<br>' + esc(ownerName) + '</p>');
+        '<p>Thanks,<br>' + esc(senderName(env)) + '</p>');
       return { to: s.email, subject: subject, text: text, html: html, kind: 'invite', link: link };
     }
 
@@ -1247,7 +1249,7 @@ var ESign = (function () {
       }
       return {
         app: cfg.appName || 'Tenancy e-sign',
-        ownerName: ownerName,
+        ownerName: senderName(env),
         agreement: {
           id: env.id, title: env.title, status: env.status, propertyAddress: env.propertyAddress,
           expiresAt: env.expiresAt, completedAt: env.completedAt || null, finalAvailable: !!env.final,
@@ -1529,7 +1531,7 @@ var ESign = (function () {
         var first = signerDetails(s).name.split(' ')[0];
         out = {
           link: link,
-          smsBody: 'Hi ' + first + ', here is your link to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + ': ' + link + ' - ' + ownerName
+          smsBody: 'Hi ' + first + ', here is your link to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + ': ' + link + ' - ' + senderName(env)
         };
       }
       store.saveEnvelope(env);
@@ -1549,9 +1551,9 @@ var ESign = (function () {
             to: s.email, kind: 'cancelled',
             subject: 'Cancelled: ' + docShort(env) + ' for ' + env.propertyAddress,
             text: 'Hi ' + signerDetails(s).name.split(' ')[0] + ',\n\nThe ' + docShort(env) + ' for ' + env.propertyAddress +
-              ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' + ownerName,
+              ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' + senderName(env),
             html: wrapHtml('<p>Hi ' + esc(signerDetails(s).name.split(' ')[0]) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(env.propertyAddress) +
-              '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p><p>' + esc(ownerName) + '</p>')
+              '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p><p>' + esc(senderName(env)) + '</p>')
           });
         }
       });
@@ -1588,7 +1590,7 @@ var ESign = (function () {
       assertMyTurn(env, s);
       if (!s.consentAt) fail('Please agree to sign electronically first.');
       var recent = (s.codeTimes || []).filter(function (x) { return minutesSince(x) < 60; });
-      if (recent.length >= MAX_CODES_PER_HOUR) fail('Too many codes have been sent. Please wait an hour and try again, or contact ' + ownerName + '.', 'RATE');
+      if (recent.length >= MAX_CODES_PER_HOUR) fail('Too many codes have been sent. Please wait an hour and try again, or contact ' + senderName(env) + '.', 'RATE');
       var code = svc.randomDigits(6);
       s.otp = { hash: sha256('otp|' + env.id + '|' + s.id + '|' + code), sentAt: iso(), attempts: 0 };
       s.otp.expiresAt = new Date(now().getTime() + OTP_MINUTES * 60000).toISOString();
@@ -1765,13 +1767,13 @@ var ESign = (function () {
           text: 'Everyone has signed ' + docPhrase(env) + ' for ' + env.propertyAddress + '. Your copy is attached (' + fin.name + ').' + extraText + '\n\n' +
             'Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:\n' +
             'Document SHA-256: ' + fin.sha256 + '\nAudit trail SHA-256: ' + env.final.auditHeadAtRender + '\n' +
-            (cfg.verifyUrl ? '\nCheck a copy at any time: ' + cfg.verifyUrl + '\n' : '') + '\n' + ownerName,
+            (cfg.verifyUrl ? '\nCheck a copy at any time: ' + cfg.verifyUrl + '\n' : '') + '\n' + senderName(env),
           html: wrapHtml('<p>Everyone has signed ' + docPhrase(env) + ' for <b>' + esc(env.propertyAddress) + '</b>. Your copy is attached (' + esc(fin.name) + ').</p>' + extraHtml +
             '<p style="font-size:14px;color:#444">Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:<br>' +
             'Document SHA-256: <code style="word-break:break-all">' + esc(fin.sha256) + '</code><br>' +
             'Audit trail SHA-256: <code style="word-break:break-all">' + esc(env.final.auditHeadAtRender) + '</code></p>' +
             (cfg.verifyUrl ? '<p style="font-size:14px">Check a copy at any time: <a href="' + esc(cfg.verifyUrl) + '">' + esc(cfg.verifyUrl) + '</a></p>' : '') +
-            '<p>' + esc(ownerName) + '</p>')
+            '<p>' + esc(senderName(env)) + '</p>')
         });
         if (ok) sent.push(addr);
         if (ok && joining) joinerCopies.push({ to: addr, documents: earlier.map(function (d) { return { id: d.id, sha256: d.final.sha256 }; }) });
