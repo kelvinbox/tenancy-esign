@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.10';
+  var VERSION = '0.3.11';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -284,7 +284,7 @@ var ESign = (function () {
     if (!v.landlord.email && v.landlordSigners.length) v.landlord.email = v.landlordSigners[0].email;
     v.landlord.signerName = v.landlordSigners.map(function (s) { return s.name; }).join(' and ');
     var s2 = v.landlordSigners[1];
-    if (s2) v.landlord.secondSigner = { name: s2.name, mobile: s2.mobile, email: s2.showEmail ? s2.email : '' };
+    if (s2) v.landlord.secondSigner = { name: s2.name, mobile: s2.mobile, email: s2.showEmail ? s2.email : '', firstSignerName: v.landlordSigners[0].name, firstSignerMobile: v.landlordSigners[0].mobile };
 
     if (!v.propertyAddress) errors.push('Enter the rental address.');
     if (!v.landlord.name) errors.push('Enter the landlord\'s name.');
@@ -635,6 +635,16 @@ var ESign = (function () {
     return e || '&mdash;';
   }
 
+  /** One mobile, or with a second landlord signer one per line with their first name: 021 111 1111 - Kelvin */
+  function landlordMobiles(L, f, mode) {
+    var L2 = L && L.secondSigner;
+    if (!L2) return fillText('{{LandlordMobile}}', f, mode);
+    var first = function (n) { return String(n || '').trim().split(/\s+/)[0]; };
+    var m1 = str(L.mobile) || str(L2.firstSignerMobile);
+    return [[m1, L2.firstSignerName], [str(L2.mobile), L2.name]].filter(function (x) { return x[0]; })
+      .map(function (x) { return val(x[0], mode) + ' - ' + esc(first(x[1])); }).join('<br>') || fillText('{{LandlordMobile}}', f, mode);
+  }
+
   var AFS_NOTE = '<br><span class="muted">Will be used as an address for service</span>';
 
   function renderParty(s, env, mode) {
@@ -695,12 +705,9 @@ var ESign = (function () {
         return '<div class="party"><div class="party-h">Landlord</div><table class="kv">' +
           kvRow('Name', fillText('{{LandlordName}}', f, mode)) +
           kvRow('Address for service', fillText('{{LandlordAddress}}', f, mode)) +
-          kvRow('Email', fillText('{{LandlordEmail}}', f, mode) + AFS_NOTE) +
+          kvRow('Email', fillText('{{LandlordEmail}}', f, mode) + (f.LandlordSigner2Email ? '<br>' + fillText('{{LandlordSigner2Email}}', f, mode) : '') + AFS_NOTE) +
           kvRow('Phone', fillText('{{LandlordPhone}}', f, mode)) +
-          kvRow('Mobile', fillText('{{LandlordMobile}}', f, mode)) +
-          (f.LandlordSigner2Name ? kvRow('Second signer', fillText('{{LandlordSigner2Name}}', f, mode)) +
-            (f.LandlordSigner2Mobile ? kvRow('Second signer mobile', fillText('{{LandlordSigner2Mobile}}', f, mode)) : '') +
-            (f.LandlordSigner2Email ? kvRow('Second signer email', fillText('{{LandlordSigner2Email}}', f, mode) + AFS_NOTE) : '') : '') +
+          kvRow('Mobile', landlordMobiles(env.landlord, f, mode)) +
           '</table></div>';
       case 'tenants':
         return env.signers.filter(function (s) { return s.kind === 'tenant'; })

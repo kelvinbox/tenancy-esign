@@ -398,7 +398,11 @@ test('second landlord signer: mobile on the agreement; email only when allowed, 
     { name: 'Pat Owner', email: 'pat@example.com', mobile: '021 000 0002', showEmail: show }];
   const hidden = memoryBackend().call({ action: 'admin.preview', input: sampleInput({ landlordSigners: signers(false) }) }).html;
   const party = hidden.slice(hidden.indexOf('1. The parties'), hidden.indexOf('2. The premises'));
-  assert.ok(party.indexOf('Pat Owner') > 0 && party.indexOf('021 000 0002') > 0, 'name and mobile shown');
+  assert.ok(party.indexOf('021 000 0001</span> - Sam') > 0 || party.indexOf('021 000 0001 - Sam') > 0, 'first signer mobile with first name: ' + party.slice(party.indexOf('Mobile'), party.indexOf('Mobile') + 200));
+  assert.ok(party.indexOf('021 000 0002</span> - Pat') > 0 || party.indexOf('021 000 0002 - Pat') > 0, 'second signer mobile with first name');
+  const rows = (party.match(/<th>[^<]+<\/th>/g) || []).slice(0, 5).join('|');
+  assert.ok(/Name.*Address for service.*Email.*Phone.*Mobile/.test(rows), 'landlord rows in order: ' + rows);
+  assert.ok(party.indexOf('Second signer') < 0, 'no separate second-signer rows');
   assert.ok(party.indexOf('pat@example.com') < 0, 'email kept off the agreement');
   const shown = memoryBackend().call({ action: 'admin.preview', input: sampleInput({ landlordSigners: signers(true) }) }).html;
   const party2 = shown.slice(shown.indexOf('1. The parties'), shown.indexOf('2. The premises'));
