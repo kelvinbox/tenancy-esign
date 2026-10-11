@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.7';
+  var VERSION = '0.3.8';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -34,9 +34,19 @@ var ESign = (function () {
 
   /** The exact statement a signer agrees to; it is stored with their signature. */
   function agreeTextFor(env, s) {
-    if (env.kind !== 'variation') return AGREE_TEXT;
+    if (env.kind !== 'variation') return env.attachments && env.attachments.length ? AGREE_TEXT + ' I have received the body corporate rules attached to it.' : AGREE_TEXT;
     return s.kind === 'incoming' ? AGREE_JOIN_TEXT : AGREE_VARIATION_TEXT;
   }
+
+  /** The landlord's declaration that the insulation and healthy homes statements are true (templates with a declaration block). */
+  function declarationText(env) {
+    return 'I/we, ' + str(env.landlord && env.landlord.name) + ', declare that the information in the insulation and healthy homes statements in section 4 of this agreement is true and correct as at the date of signing.';
+  }
+  function hasDeclarationBlock(env) {
+    return !!(env.template && (env.template.sections || []).some(function (sec) { return (sec.blocks || []).some(function (b) { return b.type === 'declaration'; }); }));
+  }
+  /** Landlord signers of an agreement whose template has the declaration also tick it, separately from signing. */
+  function needsDeclaration(env, s) { return env.kind !== 'variation' && s.kind === 'landlord' && hasDeclarationBlock(env); }
 
   /* =====================================================================
    * Small helpers
@@ -309,6 +319,10 @@ var ESign = (function () {
     if (!str(T.insulationStatement)) errors.push('Enter the insulation statement (where the insulation is, its type and condition).');
     if (!str(T.healthyHomesStatement)) errors.push('Enter the healthy homes statement.');
     if (!str(T.rentPaymentDetails)) errors.push('Say how the rent is to be paid (for example the bank account to pay into).');
+    var unitTitle = T.unitTitle === true || T.unitTitle === 'true', rules = T.bodyCorporateRules || null;
+    // a unit title property needs its body corporate rules: the name is enough to preview; the file itself is needed to send
+    if (unitTitle && !(rules && str(rules.name))) errors.push('This is a unit title property: attach the body corporate rules.');
+    if (unitTitle && rules && str(rules.base64).length > 27000000) errors.push('The body corporate rules file is too large (20 MB at most).');
 
     v.terms = {
       rentPerWeek: rent > 0 ? money(rent) : '',
@@ -325,8 +339,12 @@ var ESign = (function () {
       insulationStatement: str(T.insulationStatement),
       healthyHomesStatement: str(T.healthyHomesStatement),
       pets: str(T.pets) || 'No pets are allowed without the landlord\'s written consent.',
-      additionalTerms: str(T.additionalTerms)
+      additionalTerms: str(T.additionalTerms),
+      unitTitle: unitTitle,
+      bodyCorporateRules: unitTitle && rules && str(rules.name) ? { name: str(rules.name), sha256: '' } : null,
+      bottledGas: T.bottledGas === true || T.bottledGas === 'true'
     };
+    v.rulesFile = unitTitle && rules && str(rules.base64) ? { name: str(rules.name), mime: str(rules.mime) || 'application/pdf', base64: str(rules.base64) } : null;
 
     var tenants = Array.isArray(input.tenants) ? input.tenants : [];
     if (tenants.length < 1) errors.push('Add at least one tenant.');
@@ -452,7 +470,7 @@ var ESign = (function () {
   var FIELD_DEFS = {
     tenant: [
       { key: 'name', label: 'Full legal name', required: true, hint: 'As it appears on your ID.' },
-      { key: 'email', label: 'Email', readonly: true, hint: 'Your signing link and code were sent here. Ask the landlord if this is wrong.' },
+      { key: 'email', label: 'Email', readonly: true, hint: 'Your signing link and code were sent here, and it will be used as an address for service. Ask the landlord if this is wrong.' },
       { key: 'mobile', label: 'Mobile', required: true, type: 'tel' },
       { key: 'addressForService', label: 'Address for service', required: true, type: 'textarea', quick: 'property',
         hint: 'Where legal notices can be delivered to you. Usually the rental address once you have moved in.' },
@@ -545,7 +563,11 @@ var ESign = (function () {
       HealthyHomesStatement: t.healthyHomesStatement,
       PetsText: t.pets,
       AdditionalTerms: t.additionalTerms,
-      HasAdditionalTerms: !!t.additionalTerms
+      HasAdditionalTerms: !!t.additionalTerms,
+      IsUnitTitle: !!t.unitTitle,
+      BodyCorporateRulesName: t.bodyCorporateRules ? t.bodyCorporateRules.name : '',
+      BodyCorporateRulesSha: t.bodyCorporateRules && t.bodyCorporateRules.sha256 ? t.bodyCorporateRules.sha256 : 'recorded when the agreement is sent',
+      HasBottledGas: !!t.bottledGas
     };
     var sp = parseYmd(t.startDate), ep = parseYmd(t.endDate);
     if (sp) { f.TenancyStartDay = ordinal(sp.d); f.TenancyStartMonth = MONTHS[sp.m - 1]; f.TenancyStartYear = String(sp.y); }
@@ -607,13 +629,15 @@ var ESign = (function () {
     return e || '&mdash;';
   }
 
+  var AFS_NOTE = '<br><span class="muted">Will be used as an address for service</span>';
+
   function renderParty(s, env, mode) {
     return renderPerson(roleLabel(s.role), signerDetails(s), mode, s.kind === 'tenant' && !s.details);
   }
 
   function renderPerson(label, d, mode, pending) {
     var rows = kvRow('Full name', val(d.name, mode)) +
-      kvRow('Email', val(d.email, mode)) +
+      kvRow('Email', val(d.email, mode) + (d.email ? AFS_NOTE : '')) +
       kvRow('Mobile', val(d.mobile, mode)) +
       kvRow('Address for service', d.addressForService ? val(d.addressForService, mode) :
         (mode === 'view' ? '<span class="fv pending">To be given by the tenant when they sign</span>' : '&mdash;')) +
@@ -624,9 +648,9 @@ var ESign = (function () {
       '</div><table class="kv">' + rows + '</table></div>';
   }
 
-  function renderSignatures(env, opts) {
+  function renderSignatures(env, opts, onlyKind) {
     var mode = opts.mode, images = opts.images || {}, fmt = opts.fmt || function (x) { return x; };
-    return env.signers.map(function (s) {
+    return env.signers.filter(function (s) { return !onlyKind || s.kind === onlyKind; }).map(function (s) {
       var d = signerDetails(s);
       var box;
       if (s.status === 'Signed' && s.signature) {
@@ -665,13 +689,14 @@ var ESign = (function () {
         return '<div class="party"><div class="party-h">Landlord</div><table class="kv">' +
           kvRow('Name', fillText('{{LandlordName}}', f, mode)) +
           kvRow('Address for service', fillText('{{LandlordAddress}}', f, mode)) +
-          kvRow('Email', fillText('{{LandlordEmail}}', f, mode)) +
+          kvRow('Email', fillText('{{LandlordEmail}}', f, mode) + AFS_NOTE) +
           kvRow('Phone', fillText('{{LandlordPhone}}', f, mode)) +
           kvRow('Mobile', fillText('{{LandlordMobile}}', f, mode)) + '</table></div>';
       case 'tenants':
         return env.signers.filter(function (s) { return s.kind === 'tenant'; })
           .map(function (s) { return renderParty(s, env, mode); }).join('');
       case 'signatures': return '<div class="sigs">' + renderSignatures(env, opts) + '</div>';
+      case 'declaration': return '<p>' + esc(declarationText(env)) + '</p><div class="sigs">' + renderSignatures(env, opts, 'landlord') + '</div>';
       case 'documents':
         return '<table class="kv">' + (env.incorporates || []).map(function (d) {
           return kvRow('Version ' + d.version + ': ' + (d.kind === 'variation' ? 'variation (change of tenants)' : 'tenancy agreement'),
@@ -878,6 +903,7 @@ var ESign = (function () {
         kvRow('Signed', esc(fmt(s.signedAt))) +
         (sig.client ? kvRow('Device', esc(clientText(sig.client))) : '') +
         (sig.typedName ? kvRow('Typed name', esc(sig.typedName)) : '') +
+        (sig.declaration ? kvRow('Declared (ticked separately)', esc(sig.declaration)) : '') +
         (images[s.id] ? kvRow('Signature', '<img style="height:50px" src="' + esc(images[s.id]) + '">') : '') +
         (sig.imageSha256 ? kvRow('Signature image SHA-256', '<span class="mono">' + esc(sig.imageSha256) + '</span>') : '') +
         (sig.detailsHash ? kvRow('Confirmed details SHA-256', '<span class="mono">' + esc(sig.detailsHash) + '</span>') : '') +
@@ -1277,8 +1303,17 @@ var ESign = (function () {
         document: doc,
         fields: FIELD_DEFS[s.kind],
         consentText: CONSENT_TEXT,
-        agreeText: agreeTextFor(env, s)
+        agreeText: agreeTextFor(env, s),
+        declarationText: needsDeclaration(env, s) ? declarationText(env) : null,
+        attachments: attachmentsFor(env).map(function (a) { return { id: a.id, label: a.label, name: a.name, sha256: a.sha256 }; })
       };
+    }
+
+    /** Files that form part of the agreement (body corporate rules); a variation includes those of the agreement it amends. */
+    function attachmentsFor(env) {
+      var list = (env.attachments || []).slice(), seen = {};
+      if (env.kind === 'variation') incorporatedEnvs(env).forEach(function (d) { (d.attachments || []).forEach(function (a) { list.push(a); }); });
+      return list.filter(function (a) { if (seen[a.sha256]) return false; seen[a.sha256] = 1; return true; });
     }
 
     function adminView(env) {
@@ -1378,12 +1413,19 @@ var ESign = (function () {
         });
       });
       env.signers = env.signers.concat(landlordSignerRecords(v));
+      if (v.terms.unitTitle) {   // a frozen copy of the body corporate rules; its fingerprint is part of the locked terms
+        if (!v.rulesFile) fail('This is a unit title property: attach the body corporate rules file.', 'INVALID');
+        var sf = svc.saveFile(id, v.rulesFile.name, v.rulesFile.base64, v.rulesFile.mime);
+        env.terms.bodyCorporateRules = { name: v.rulesFile.name, sha256: sf.sha256 };
+        env.attachments = [{ id: sf.sha256, label: 'Body corporate rules', name: v.rulesFile.name, ref: sf.ref, sha256: sf.sha256, mime: v.rulesFile.mime }];
+      }
       env.termsHash = termsHashOf(env);
 
       audit(env, 'AGREEMENT_CREATED', actor || 'landlord', {
         termsHash: env.termsHash, templateId: tpl.id, templateVersion: tpl.version, templateHash: env.templateHash,
         signingOrder: env.signers.map(function (s) { return roleLabel(s.role) + ': ' + signerDetails(s).name + ' <' + s.email + '>'; }),
-        expiresAt: env.expiresAt, warnings: r.warnings
+        expiresAt: env.expiresAt, warnings: r.warnings,
+        attachments: (env.attachments || []).map(function (a) { return { label: a.label, name: a.name, sha256: a.sha256 }; })
       });
       var inv = sendInvite(env, env.signers[0], 'first signer', 'system');
       store.saveEnvelope(env);
@@ -1665,6 +1707,8 @@ var ESign = (function () {
       if (!s.reviewedAt) fail('Please read the agreement to the end first.');
       if (str(p.termsHash) !== env.termsHash) fail('The agreement has changed since you opened it. Please reload the page.', 'STALE');
       if (p.agree !== true) fail('Please tick the box to confirm you agree.');
+      var declaration = needsDeclaration(env, s) ? declarationText(env) : '';
+      if (declaration && p.declare !== true) fail('Please tick the box to declare that the statements in section 4 are true and correct.');
 
       var dv = validateDetails(s.kind, p.details, signerDetails(s));
       if (dv.errors.length) fail(dv.errors.join('\n'), 'INVALID');
@@ -1696,15 +1740,18 @@ var ESign = (function () {
         statement: agreeTextFor(env, s),
         client: cleanClient(client)
       };
-      sig.recordHash = hashOf({
+      var rec = {
         agreementId: env.id, role: s.role, email: s.email, termsHash: sig.termsHash, detailsHash: detailsHash,
         imageSha256: sig.imageSha256, typedName: typed, signedAt: signedAt, statement: agreeTextFor(env, s)
-      });
+      };
+      if (declaration) { sig.declaration = declaration; rec.declaration = declaration; }
+      sig.recordHash = hashOf(rec);
       s.details = details;
       s.signature = sig;
       s.signedAt = signedAt;
       s.status = 'Signed';
       s.otp = null;
+      if (declaration) audit(env, 'STATEMENTS_DECLARED', actorOf(s), { signer: s.role, name: details.name, statement: declaration, termsHash: env.termsHash }, client);
       audit(env, 'SIGNED', actorOf(s), {
         signer: s.role, name: details.name, typedName: typed, statement: agreeTextFor(env, s),
         termsHash: env.termsHash, detailsHash: detailsHash, signatureSha256: img.sha256, recordHash: sig.recordHash,
@@ -1759,7 +1806,8 @@ var ESign = (function () {
       var sent = [], joinerCopies = [];
       to.forEach(function (addr) {
         var joining = joiners.indexOf(addr) >= 0 && earlier.length;
-        var attachments = [{ ref: fin.ref, name: fin.name }].concat(joining ? earlier.map(function (d) { return { ref: d.final.ref, name: d.final.name }; }) : []);
+        var attachments = [{ ref: fin.ref, name: fin.name }].concat(joining ? earlier.map(function (d) { return { ref: d.final.ref, name: d.final.name }; }) : [])
+          .concat((env.kind === 'variation' ? (joining ? attachmentsFor(env) : []) : attachmentsFor(env)).map(function (a) { return { ref: a.ref, name: a.name }; }));
         var extraText = joining ? '\n\nAlso attached are the signed documents that make up the tenancy agreement you have joined:\n' +
           earlier.map(function (d) { return '- ' + d.final.name + ' (SHA-256 ' + d.final.sha256 + ')'; }).join('\n') : '';
         var extraHtml = joining ? '<p>Also attached are the signed documents that make up the tenancy agreement you have joined:</p><ul>' +
@@ -1818,6 +1866,13 @@ var ESign = (function () {
       releaseParent(env, 'Declined');
       notify(env, 'declined');
       return signerView(env, s);
+    }
+
+    function signerAttachment(token, id) {
+      var f = bySignerToken(token), a = attachmentsFor(f.env).filter(function (x) { return x.id === str(id); })[0];
+      if (!a) fail('That file isn\'t part of this agreement.');
+      var file = svc.readFinal(a.ref);
+      return { name: a.name, mime: a.mime || file.mime, base64: file.base64 };
     }
 
     function signerDownload(token) {
@@ -1889,6 +1944,7 @@ var ESign = (function () {
       submit: submit,
       decline: decline,
       signerDownload: signerDownload,
+      signerAttachment: signerAttachment,
       verify: verify,
       createVariation: createVariation,
       previewVariation: previewVariation,
@@ -1920,6 +1976,7 @@ var ESign = (function () {
       case 'sign.submit': return engine.submit(req.token, req.payload, req.client);
       case 'sign.decline': return engine.decline(req.token, req.reason, req.client);
       case 'sign.download': return engine.signerDownload(req.token);
+      case 'sign.attachment': return engine.signerAttachment(req.token, req.id);
       case 'admin.list': return engine.list();
       case 'admin.get': return engine.get(req.id);
       case 'admin.preview': return engine.preview(req.input);

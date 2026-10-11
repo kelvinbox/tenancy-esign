@@ -176,11 +176,18 @@
         return '<details open data-sec="' + esc(s.id) + '"><summary><span class="tick">&#10003;</span><span>' + esc(s.heading) + '</span><span class="chev">&#8250;</span></summary><div class="sec-body">' + s.html + '</div></details>';
       }).join('') +
       '<div class="end-marker" id="endMarker">&#8212; End of agreement &#8212;</div></div>' +
+      attachmentsCard() +
       '<div class="card small"><b>Something not right?</b> If any of the terms are wrong, don\'t sign. <button class="btn link small" id="declineBtn" type="button">Tell the landlord and decline</button></div>';
     setBar('<div class="grow hint" id="readHint">Scroll to the end to continue</div><button class="btn" id="go" disabled>I\'ve read it</button>');
     var go = $('#go');
     $('#declineBtn').addEventListener('click', openDecline);
 
+    UI.$all('[data-att]', app).forEach(function (b) {
+      b.addEventListener('click', function () {
+        UI.busy(b, true, 'Opening...');
+        ESignApi.signerCall('sign.attachment', { token: token, id: b.dataset.att }).then(function (f) { UI.busy(b, false); UI.downloadB64(f); }).catch(function (e) { showError(e, b); });
+      });
+    });
     var secs = UI.$all('details[data-sec]');
     function markSeen() {
       var vh = window.innerHeight;
@@ -211,6 +218,14 @@
         .then(function (v) { window.removeEventListener('scroll', onScroll); view = v; step = 'details'; render(); })
         .catch(function (e) { showError(e, go); });
     });
+  }
+
+  /* files that form part of the agreement, e.g. the body corporate rules */
+  function attachmentsCard() {
+    var list = view.attachments || [];
+    if (!list.length) return '';
+    return '<div class="card"><h2>Attached documents</h2><p class="small muted">These form part of the agreement. Open and read them before you sign.</p>' +
+      list.map(function (a) { return '<button class="btn light block" type="button" style="margin-top:8px" data-att="' + esc(a.id) + '">&#128196; ' + esc(a.label) + ': ' + esc(a.name) + '</button>'; }).join('') + '</div>';
   }
 
   function fieldHtml(f) {
@@ -283,20 +298,23 @@
       '<div class="pad-wrap" id="pad"><canvas></canvas><div class="pad-line"></div><div class="pad-x">&#10005;</div><div class="pad-hint">Sign here</div></div>' +
       '<div class="pad-tools"><button class="btn link small" id="undo" type="button">Undo</button><button class="btn link small" id="clear" type="button">Clear</button></div>' +
       '<label class="f" style="margin-top:12px"><span class="l">Type your full name</span><input id="typed" type="text" autocomplete="off" autocapitalize="words" placeholder="' + esc(details.name) + '"><span class="h">Must match: ' + esc(details.name) + '</span></label>' +
+      (view.declarationText ? '<label class="check" id="declareBox"><input type="checkbox" id="declare"><span>' + esc(view.declarationText) + '</span></label>' : '') +
       '<label class="check" id="agreeBox"><input type="checkbox" id="agree"><span>' + esc(view.agreeText) + '</span></label>' +
       '</div>';
     setBar('<button class="btn block" id="go" disabled>&#9997;&#65039; Sign the agreement</button>');
-    var go = $('#go'), typed = $('#typed'), agree = $('#agree');
+    var go = $('#go'), typed = $('#typed'), agree = $('#agree'), declare = $('#declare');
     function check() {
-      var ok = pad && !pad.isEmpty() && ESign.normName(typed.value) === ESign.normName(details.name) && agree.checked;
+      var ok = pad && !pad.isEmpty() && ESign.normName(typed.value) === ESign.normName(details.name) && agree.checked && (!declare || declare.checked);
       go.disabled = !ok;
       $('#agreeBox').classList.toggle('on', agree.checked);
+      if (declare) $('#declareBox').classList.toggle('on', declare.checked);
     }
     pad = SignaturePad($('#pad'), check);
     $('#undo').addEventListener('click', function () { pad.undo(); });
     $('#clear').addEventListener('click', function () { pad.clear(); });
     typed.addEventListener('input', check);
     agree.addEventListener('change', check);
+    if (declare) declare.addEventListener('change', check);
     $('#edit').addEventListener('click', function () { step = 'details'; render(); });
     go.addEventListener('click', function () {
       if (go.disabled) return;
@@ -304,7 +322,7 @@
       ESignApi.signerCall('sign.submit', {
         token: token,
         payload: {
-          details: details, typedName: typed.value.trim(), agree: true, termsHash: view.termsHash,
+          details: details, typedName: typed.value.trim(), agree: true, declare: !!(declare && declare.checked), termsHash: view.termsHash,
           signaturePng: pad.toPng(), strokes: pad.stats(), submissionId: submissionId
         }
       }).then(function (v) { view = v; render(); }).catch(function (e) { showError(e, go); });

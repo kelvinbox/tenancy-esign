@@ -206,7 +206,10 @@ function esignBuildAgreementInput_(ctx) {
       insulationStatement: p.insulationStatement || '',
       healthyHomesStatement: p.healthyHomesStatement || '',
       pets: p.pets || '',
-      additionalTerms: p.additionalTerms || ''
+      additionalTerms: p.additionalTerms || '',
+      unitTitle: !!p.unitTitle,
+      bodyCorporateRules: p.unitTitle && p.bodyCorporateRules ? p.bodyCorporateRules : null,   // { name, mime, base64 }
+      bottledGas: !!p.bottledGas
     },
     tenants: (ctx.applicants || []).map(esignTenantFromApplicant_),
     source: {

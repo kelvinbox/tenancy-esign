@@ -232,6 +232,11 @@ function services_(p) {
       var file = envFolder(envId).createFile(Utilities.newBlob(bytes, 'image/png', name));
       return { ref: file.getId(), sha256: sha(bytes) };
     },
+    saveFile: function (envId, name, base64, mime) {   // a file that is part of the agreement (body corporate rules)
+      var bytes = Utilities.base64Decode(base64);
+      var file = envFolder(envId).createFile(Utilities.newBlob(bytes, mime || 'application/pdf', name));
+      return { ref: file.getId(), sha256: sha(bytes) };
+    },
     loadImage: function (ref) {
       return 'data:image/png;base64,' + Utilities.base64Encode(DriveApp.getFileById(ref).getBlob().getBytes());
     },

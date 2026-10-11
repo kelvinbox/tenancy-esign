@@ -9,7 +9,7 @@
  * editing this file never changes an agreement that is already out for signing.
  *
  * Block types: p (paragraph), h (sub-heading), kv (label/value rows), list (numbered),
- * landlord, tenants, signatures. A list item {each: 'Field'} becomes one numbered item per line of that field.
+ * landlord, tenants, signatures, declaration (the landlord's signed declaration). A list item {each: 'Field'} becomes one numbered item per line of that field.
  * Any block, kv row (3rd element) or list item can carry
  * {when: 'Field'} or {unless: 'Field'}.
  *
@@ -25,17 +25,21 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.4.0',
+    version: '1.5.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
       '(the Act) applies to it. If a term of this agreement is inconsistent with the Act, the Act applies instead. ' +
+      'If this tenancy would otherwise be excluded from the Act by section 5 of the Act, the parties agree that the Act applies to it in full, with all of its rights and obligations. ' +
       'Free information about the rights and obligations of tenants and landlords is at tenancy.govt.nz or on 0800 836 262.',
     sections: [
       {
         id: 'parties',
         heading: '1. The parties',
-        blocks: [{ type: 'landlord' }, { type: 'tenants' }]
+        blocks: [
+          { type: 'landlord' }, { type: 'tenants' },
+          { type: 'p', text: 'The email address given for each party will be used as an address for service, so notices and other documents about the tenancy can be given by email.' }
+        ]
       },
       {
         id: 'premises',
@@ -48,7 +52,9 @@ var ESignTemplates = (function () {
               ['Start date', '{{TenancyStart}}'],
               ['End date', '{{TenancyEnd}}', { when: 'IsFixedTerm' }],
               ['Maximum number of occupants', '{{MaximumOccupants}}'],
-              ['Chattels provided by the landlord', '{{Chattels}}']
+              ['Chattels provided by the landlord', '{{Chattels}}'],
+              ['Unit title property', 'Yes. The current body corporate rules are attached and form part of this agreement.', { when: 'IsUnitTitle' }],
+              ['Body corporate rules', '{{BodyCorporateRulesName}}', { when: 'IsUnitTitle' }]
             ]
           },
           { type: 'p', when: 'IsFixedTerm', text: 'This is a fixed-term tenancy. When the fixed term ends it becomes a periodic tenancy, unless the parties agree otherwise or notice is given as the Act allows.' },
@@ -85,13 +91,16 @@ var ESignTemplates = (function () {
           { type: 'h', text: 'Insurance' },
           { type: 'p', when: 'IsInsured', text: 'The premises are insured with {{Insurer}} (policy {{InsurancePolicy}}). The excess is ${{ExcessAmount}}. The tenant can ask the landlord for a copy of the insurance policy.' },
           { type: 'p', when: 'IsInsured', text: 'There is insurance covering this rental property that is relevant to tenant\u2019s liability for damage to premises, including damage to body corporate facilities.' },
+          { type: 'p', when: 'IsInsured', text: 'If these insurance details change, the landlord will give the tenant the correct information within a reasonable time.' },
           { type: 'p', unless: 'IsInsured', text: 'The premises are not insured.' },
-          { type: 'p', text: 'If the tenant, or someone they allow on the premises, carelessly damages the premises, the tenant may be liable for the cost of the damage up to 4 weeks\' rent, or up to the insurance excess if that is lower. Different rules apply to intentional damage and damage caused by a criminal act.' },
+          { type: 'p', text: 'If the tenant, or someone they allow on the premises, carelessly damages the premises, the tenant is liable for the cost of the damage up to 4 weeks\' rent or the insurance excess (if any), whichever is lower. The tenant is liable for the full cost of damage that they or their guests cause intentionally, or that results from an act or omission that is an imprisonable offence.' },
           { type: 'h', text: 'Insulation' },
           { type: 'p', text: '{{InsulationStatement}}' },
           { type: 'p', when: 'HasInsulationDate', text: 'The insulation was last inspected on {{InsulationInspectionDate}}.' },
           { type: 'h', text: 'Healthy homes standards' },
           { type: 'p', text: '{{HealthyHomesStatement}}' },
+          { type: 'h', text: 'Landlord declaration' },
+          { type: 'declaration' },
           { type: 'h', text: 'Smoke alarms' },
           { type: 'p', text: 'The landlord has installed working smoke alarms as the law requires. The tenant must not damage, disconnect or remove a smoke alarm, must replace the batteries in any alarm that uses replaceable batteries, and must tell the landlord promptly if an alarm is not working.' }
         ]
@@ -105,7 +114,8 @@ var ESignTemplates = (function () {
             'maintain the premises in a reasonable state of repair, having regard to their age and character, and comply with building, health and safety laws that apply to them',
             'let the tenant have quiet enjoyment of the premises',
             'give at least 48 hours\' notice before an inspection (no more than one inspection every 4 weeks), and at least 24 hours\' notice before entering to do repairs or maintenance, entering only between 8am and 7pm',
-            'tell the tenant in writing of any change to the landlord\'s name, contact details or address for service'
+            'tell the tenant in writing within 10 working days of any change to the landlord\'s name, contact details or address for service',
+            { text: 'tell the tenant of any changes to the body corporate rules that affect the premises', when: 'IsUnitTitle' }
           ]
         }]
       },
@@ -115,6 +125,8 @@ var ESignTemplates = (function () {
         blocks: [{
           type: 'list', items: [
             'pay the rent on time',
+            'pay for the electricity, telephone and internet services they use during the tenancy',
+            { text: 'pay for the bottled gas they use (refills). The landlord pays the gas bottle hire', when: 'HasBottledGas' },
             'keep the premises reasonably clean and tidy, and remove rubbish as required',
             'tell the landlord as soon as possible about any damage or anything that needs repair',
             'not intentionally or carelessly damage the premises, or let anyone else do so',
@@ -122,7 +134,10 @@ var ESignTemplates = (function () {
             'not disturb the neighbours\' peace, comfort or privacy',
             'not make changes to the premises without the landlord\'s written consent',
             'not let more than the maximum number of occupants live at the premises',
-            'not sublet the premises, or any part of them, without the landlord\'s explicit written permission',
+            'not sublet the premises or any part of them, or otherwise part with possession of them (other than by assignment), without the landlord\'s explicit written permission',
+            'not assign the tenancy without the landlord\'s prior written consent. The landlord will consider any request to assign the tenancy and will not unreasonably withhold consent',
+            { text: 'comply with the body corporate rules that apply to the premises', when: 'IsUnitTitle' },
+            'tell the landlord in writing within 10 working days of any change to their name, contact details or address for service',
             'at the end of the tenancy, leave the premises reasonably clean and tidy, remove all their belongings and rubbish, and return all keys and remotes'
           ]
         }]
@@ -149,7 +164,8 @@ var ESignTemplates = (function () {
               { each: 'AdditionalTerms', when: 'HasAdditionalTerms' }
             ]
           },
-          { type: 'p', text: 'Any term in this section that is inconsistent with the Act has no effect.' }
+          { type: 'p', text: 'Any term in this section that is inconsistent with the Act has no effect.' },
+          { type: 'p', text: 'The landlord and the tenant will handle each other\'s personal information as the Privacy Act 2020 requires. Information in this agreement will not be used or disclosed without consent for any purpose other than running the tenancy or taking legal action about it.' }
         ]
       },
       {

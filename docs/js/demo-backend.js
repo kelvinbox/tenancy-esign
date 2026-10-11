@@ -85,6 +85,13 @@ var DemoBackend = (function () {
       save(db);
       return { ref: ref, sha256: ESign.sha256(b64ToBytes(dataUrl.split(',')[1])) };
     },
+    saveFile: function (envId, name, base64, mime) {
+      var db = load(), ref = 'file-' + randomString(10);
+      db.files = db.files || {};
+      db.files[ref] = { name: name, mime: mime, base64: base64 };
+      save(db);
+      return { ref: ref, sha256: ESign.sha256(b64ToBytes(base64)) };
+    },
     loadImage: function (ref) { return load().images[ref]; },
     storeFinal: function (env, html) {
       var db = load(), ref = 'final-' + env.id;
@@ -93,6 +100,8 @@ var DemoBackend = (function () {
       return { ref: ref, url: null, sha256: ESign.sha256(html), name: env.id + ' signed.html', mime: 'text/html' };
     },
     readFinal: function (ref) {
+      var files = load().files || {};
+      if (files[ref]) return { name: files[ref].name, mime: files[ref].mime, base64: files[ref].base64 };
       var html = load().finals[ref];
       return { name: ref.replace(/^final-/, '') + ' signed.html', mime: 'text/html', base64: utf8ToB64(html) };
     },

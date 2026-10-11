@@ -158,7 +158,7 @@ test('Apps Script backend: full signing flow through doPost', () => {
     assert.equal(g.post({ action: 'sign.verifyCode', token, code, client }).ok, true);
     g.post({ action: 'sign.reviewed', token, client, info: { termsHash: open.data.termsHash, secondsOnPage: 30 } });
     const details = Object.assign({}, open.data.me.details, { addressForService: 'Here' });
-    const r = g.post({ action: 'sign.submit', token, client, payload: { details, typedName: details.name, agree: true, termsHash: open.data.termsHash, signaturePng: SIGNATURE, strokes: { count: 2 }, submissionId: 'x' + email } });
+    const r = g.post({ action: 'sign.submit', token, client, payload: { details, typedName: details.name, agree: true, declare: !!open.data.declarationText, termsHash: open.data.termsHash, signaturePng: SIGNATURE, strokes: { count: 2 }, submissionId: 'x' + email } });
     assert.equal(r.ok, true, r.error);
     return { token, view: r.data };
   };
@@ -207,7 +207,7 @@ test('Apps Script backend: a joining tenant is emailed the variation and the ori
     g.post({ action: 'sign.verifyCode', token, code: g.mails.slice(-1)[0].subject.slice(0, 6) });
     g.post({ action: 'sign.reviewed', token, info: { termsHash: open.data.termsHash } });
     const details = Object.assign({}, open.data.me.details, { addressForService: 'Here' });
-    const r = g.post({ action: 'sign.submit', token, payload: { details, typedName: details.name, agree: true, termsHash: open.data.termsHash, signaturePng: SIGNATURE, strokes: { count: 1 }, submissionId: email + Math.random() } });
+    const r = g.post({ action: 'sign.submit', token, payload: { details, typedName: details.name, agree: true, declare: !!open.data.declarationText, termsHash: open.data.termsHash, signaturePng: SIGNATURE, strokes: { count: 1 }, submissionId: email + Math.random() } });
     assert.equal(r.ok, true, r.error);
   };
   const id = g.post({ action: 'admin.create', adminKey: key, input: sampleInput() }).data.agreement.id;

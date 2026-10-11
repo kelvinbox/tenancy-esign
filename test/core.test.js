@@ -319,7 +319,7 @@ test('template 1.2.0: numbered additional terms, sections 5-7 wording', () => {
 test('template 1.3.0: section 6 bars subletting without explicit permission', () => {
   const html = memoryBackend().call({ action: 'admin.preview', input: sampleInput() }).html;
   const s6 = html.slice(html.indexOf('6. The tenant agrees to'), html.indexOf('7. Ending the tenancy'));
-  assert.ok(s6.indexOf('not sublet the premises, or any part of them, without the landlord&#39;s explicit written permission') > 0);
+  assert.ok(s6.indexOf('not sublet the premises or any part of them, or otherwise part with possession of them (other than by assignment), without the landlord&#39;s explicit written permission') > 0);
   assert.ok(html.indexOf('nz-residential-v1') < 0 || /1\.3\.0/.test(html) || true);
 });
 
@@ -328,4 +328,66 @@ test('template 1.4.0: no smoking or vaping in or on the premises', () => {
   const other = html.slice(html.indexOf('8. Other terms'), html.indexOf('9. Signing electronically'));
   assert.ok(other.indexOf('Smoking and vaping are not allowed in or on the premises.') > 0);
   assert.ok(html.indexOf('inside the premises') < 0, 'old wording gone');
+});
+
+test('template 1.5.0: Tenancy Services comparison wording', () => {
+  const html = memoryBackend().call({ action: 'admin.preview', input: sampleInput() }).html;
+  const has = (t) => assert.ok(html.indexOf(t) >= 0, 'missing: ' + t);
+  has('excluded from the Act by section 5 of the Act, the parties agree that the Act applies to it in full');
+  has('The email address given for each party will be used as an address for service');
+  has('Will be used as an address for service');
+  has('If these insurance details change, the landlord will give the tenant the correct information within a reasonable time.');
+  has('the insurance excess (if any), whichever is lower');
+  has('full cost of damage that they or their guests cause intentionally, or that results from an act or omission that is an imprisonable offence');
+  has('within 10 working days of any change to the landlord&#39;s name');
+  has('within 10 working days of any change to their name');
+  has('not assign the tenancy without the landlord&#39;s prior written consent');
+  has('pay for the electricity, telephone and internet services they use');
+  has('Privacy Act 2020');
+  has('declare that the information in the insulation and healthy homes statements in section 4');
+  assert.ok(html.indexOf('bottled gas') < 0 && html.indexOf('body corporate rules') < 0, 'gas and unit title wording only when they apply');
+  const gas = memoryBackend().call({ action: 'admin.preview', input: sampleInput({ terms: Object.assign({}, sampleInput().terms, { bottledGas: true }) }) }).html;
+  assert.ok(gas.indexOf('pay for the bottled gas they use (refills). The landlord pays the gas bottle hire') > 0);
+});
+
+test('landlord declares the section 4 statements separately; it is recorded and shown with their signature', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  const t1 = signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  assert.equal(t1.declarationText, null, 'tenants are not asked');
+  signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')));
+  const lt = b.tokenFrom(b.lastEmail('landlord@example.com', 'invite'));
+  assert.throws(() => signAs(b, lt, { declare: false }), /declare that the statements in section 4/);
+  const lv = signAs(b, lt);
+  assert.equal(lv.agreement.status, 'Completed');
+  const full = b.call({ action: 'admin.get', id });
+  const ev = full.events.find(e => e.type === 'STATEMENTS_DECLARED');
+  assert.ok(ev && /I\/we, Example Family Trust, declare/.test(ev.data ? ev.data.statement : JSON.stringify(ev)));
+  const fin = b.db.finals[Object.keys(b.db.finals)[0]];
+  assert.ok(fin.indexOf('Declared (ticked separately)') > 0, 'certificate records the declaration');
+});
+
+test('unit title: the body corporate rules are attached, opened from the signing page and emailed', () => {
+  const b = memoryBackend();
+  const pdf = Buffer.from('%PDF-1.4 fake rules').toString('base64');
+  const terms = Object.assign({}, sampleInput().terms, { unitTitle: true });
+  // needs the rules
+  assert.throws(() => b.call({ action: 'admin.create', input: sampleInput({ terms }) }), /attach the body corporate rules/);
+  // preview needs only the name
+  const pv = b.call({ action: 'admin.preview', input: sampleInput({ terms: Object.assign({}, terms, { bodyCorporateRules: { name: 'Kowhai BC rules.pdf' } }) }) });
+  assert.equal(pv.errors.length, 0); assert.ok(pv.html.indexOf('Kowhai BC rules.pdf') > 0 && pv.html.indexOf('comply with the body corporate rules') > 0);
+  const res = b.call({ action: 'admin.create', input: sampleInput({ terms: Object.assign({}, terms, { bodyCorporateRules: { name: 'Kowhai BC rules.pdf', mime: 'application/pdf', base64: pdf } }) }) });
+  const token = b.tokenFrom(b.lastEmail('mia@example.com', 'invite'));
+  const view = b.call({ action: 'sign.open', token });
+  assert.equal(view.attachments.length, 1);
+  assert.match(view.agreeText, /received the body corporate rules/);
+  const f = b.call({ action: 'sign.attachment', token, id: view.attachments[0].id });
+  assert.equal(f.name, 'Kowhai BC rules.pdf'); assert.equal(f.base64, pdf);
+  assert.throws(() => b.call({ action: 'sign.attachment', token, id: 'nope' }), /isn't part of this agreement/);
+  signAs(b, token);
+  signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')));
+  signAs(b, b.tokenFrom(b.lastEmail('landlord@example.com', 'invite')));
+  const done = b.lastEmail('mia@example.com', 'completed');
+  assert.equal(done.attachments.length, 2, 'signed copy + body corporate rules');
+  assert.ok(b.call({ action: 'admin.get', id: res.agreement.id }).terms.bodyCorporateRules.sha256.length === 64);
 });

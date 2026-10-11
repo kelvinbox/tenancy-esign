@@ -32,13 +32,18 @@ function memoryBackend(opts) {
       db.images[ref] = dataUrl;
       return { ref, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
     },
+    saveFile: (envId, name, base64, mime) => {
+      const ref = 'file' + Object.keys(db.files || (db.files = {})).length;
+      db.files[ref] = { name, mime, base64 };
+      return { ref, sha256: crypto.createHash('sha256').update(Buffer.from(base64, 'base64')).digest('hex') };
+    },
     loadImage: ref => db.images[ref],
     storeFinal: (env, html) => {
       const ref = 'fin-' + env.id;
       db.finals[ref] = html;
       return { ref, sha256: crypto.createHash('sha256').update(html, 'utf8').digest('hex'), name: env.id + '.html', mime: 'text/html' };
     },
-    readFinal: ref => ({ name: ref + '.html', mime: 'text/html', base64: Buffer.from(db.finals[ref]).toString('base64') })
+    readFinal: ref => (db.files && db.files[ref]) ? Object.assign({}, db.files[ref]) : ({ name: ref + '.html', mime: 'text/html', base64: Buffer.from(db.finals[ref]).toString('base64') })
   };
   const engine = ESign.createEngine(store, svc);
   return {
@@ -82,7 +87,7 @@ function signAs(b, token, over) {
   return b.call({
     action: 'sign.submit', token, client,
     payload: {
-      details, typedName: over.typedName || details.name, agree: true, termsHash: view.termsHash,
+      details, typedName: over.typedName || details.name, agree: true, declare: over.declare !== undefined ? over.declare : !!view.declarationText, termsHash: view.termsHash,
       signaturePng: SIGNATURE, strokes: { count: 3, points: 120, ms: 2100 }, submissionId: over.submissionId || 'sub-' + Math.random()
     }
   });
