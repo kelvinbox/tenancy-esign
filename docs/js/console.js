@@ -237,7 +237,8 @@
 
   function blankForm() {
     return {
-      propertyAddress: '', landlord: { name: '', signerName: '', email: '', phone: '', mobile: '', addressForService: '' },
+      propertyAddress: '', landlord: { name: '', email: '', phone: '', mobile: '', addressForService: '' },
+      landlordSigners: [{ name: '', email: '', mobile: '' }],
       terms: { rentPerWeek: '', bond: '', startDate: '', length: '12 months', endDate: '', maxOccupants: '', rentPaymentDetails: '', chattels: '',
         insurer: '', insurancePolicy: '', excess: '', insulationDate: '', insulationStatement: '', healthyHomesStatement: '', pets: '', additionalTerms: '' },
       tenants: [{ name: '', email: '', mobile: '', idType: 'Driver licence', idNumber: '', dob: '' }],
@@ -260,7 +261,10 @@
   function applyProperty(p) {
     var L = DemoData.landlords.filter(function (l) { return l.name === p.landlord; })[0];
     form.propertyAddress = p.address;
-    if (L) form.landlord = JSON.parse(JSON.stringify(L));
+    if (L) {
+      form.landlord = { name: L.name, email: L.email, phone: L.phone, mobile: L.mobile, addressForService: L.addressForService };
+      form.landlordSigners = JSON.parse(JSON.stringify(L.signers));
+    }
     Object.assign(form.terms, {
       rentPerWeek: p.rent, bond: p.bond, maxOccupants: p.maxOccupants, length: p.tenancyLength, chattels: p.chattels,
       insurer: p.insurer, insurancePolicy: p.insurancePolicy, excess: p.excess, insulationDate: p.insulationDate,
@@ -319,10 +323,21 @@
     }
     h += '<div class="card"><h2>&#127968; Property and landlord</h2>' +
       inp('propertyAddress', 'Rental address', { placeholder: 'Street, suburb' }) +
-      '<div class="grid2">' + inp('landlord.name', 'Landlord name') + inp('landlord.signerName', 'Signs as') + '</div>' +
-      inp('landlord.email', 'Landlord email', { type: 'email', hint: 'The landlord signs last, using a link sent here.' }) +
+      inp('landlord.name', 'Landlord name', { hint: 'As it appears on the agreement, e.g. a person, both owners, or a trust.' }) +
+      inp('landlord.email', 'Landlord contact email', { type: 'email', hint: 'Shown on the agreement.' }) +
       '<div class="grid2">' + inp('landlord.phone', 'Landlord phone', { type: 'tel' }) + inp('landlord.mobile', 'Landlord mobile', { type: 'tel' }) + '</div>' +
-      inp('landlord.addressForService', 'Landlord address for service', { type: 'textarea', rows: 2 }) + '</div>';
+      inp('landlord.addressForService', 'Landlord address for service', { type: 'textarea', rows: 2 }) +
+      '<h3>Who signs for the landlord</h3><p class="small muted">One or two people. They sign after the tenants, in this order, each with their own link and code.</p>';
+    form.landlordSigners.forEach(function (s, i) {
+      h += '<div class="party" style="background:#f8fafb;border-radius:12px;padding:12px;margin-bottom:10px"><div class="row" style="margin-bottom:6px"><b class="grow">' +
+        (form.landlordSigners.length > 1 ? 'Landlord signer ' + (i + 1) : 'Landlord signer') + '</b>' +
+        (i > 0 ? '<button class="btn small ghost" data-lup="' + i + '" type="button" aria-label="Move up">&#8593;</button>' : '') +
+        (form.landlordSigners.length > 1 ? '<button class="btn small danger" data-lrm="' + i + '" type="button">Remove</button>' : '') + '</div>' +
+        inp('landlordSigners.' + i + '.name', 'Full name') +
+        '<div class="grid2">' + inp('landlordSigners.' + i + '.email', 'Email', { type: 'email', hint: 'Their signing link goes here.' }) + inp('landlordSigners.' + i + '.mobile', 'Mobile', { type: 'tel' }) + '</div></div>';
+    });
+    if (form.landlordSigners.length < 2) h += '<button class="btn light block" id="addLandlord" type="button">+ Add a second landlord signer</button>';
+    h += '</div>';
 
     h += '<div class="card"><h2>&#128176; Rent, bond and dates</h2>' +
       '<div class="grid2">' + inp('terms.rentPerWeek', 'Rent per week ($)', { inputmode: 'decimal' }) + inp('terms.bond', 'Bond ($)', { inputmode: 'decimal', hint: '<span id="bondHint">' + esc(bondHint()) + '</span>' }) + '</div>' +
@@ -339,7 +354,7 @@
       inp('terms.pets', 'Pets', { placeholder: 'No pets are allowed without the landlord\'s written consent.' }) +
       inp('terms.additionalTerms', 'Other terms (optional)', { type: 'textarea', rows: 2 }) + '</div>';
 
-    h += '<div class="card"><h2>&#128101; Tenants, in signing order</h2><p class="small muted">Tenant 1 signs first, then the others in order. The landlord signs last. Each person needs their own email.</p>';
+    h += '<div class="card"><h2>&#128101; Tenants, in signing order</h2><p class="small muted">Tenant 1 signs first, then the others in order. The landlord signer(s) sign last. Each person needs their own email.</p>';
     form.tenants.forEach(function (t, i) {
       h += '<div class="party" style="background:#f8fafb;border-radius:12px;padding:12px;margin-bottom:10px"><div class="row" style="margin-bottom:6px"><b class="grow">Tenant ' + (i + 1) + '</b>' +
         (i > 0 ? '<button class="btn small ghost" data-up="' + i + '" type="button" aria-label="Move up">&#8593;</button>' : '') +
@@ -374,6 +389,12 @@
     $all('[data-up]').forEach(function (b) {
       b.addEventListener('click', function () { var i = +b.dataset.up, t = form.tenants[i]; form.tenants[i] = form.tenants[i - 1]; form.tenants[i - 1] = t; renderNew(); });
     });
+    $all('[data-lrm]').forEach(function (b) { b.addEventListener('click', function () { form.landlordSigners.splice(+b.dataset.lrm, 1); renderNew(); }); });
+    $all('[data-lup]').forEach(function (b) {
+      b.addEventListener('click', function () { var i = +b.dataset.lup, s = form.landlordSigners[i]; form.landlordSigners[i] = form.landlordSigners[i - 1]; form.landlordSigners[i - 1] = s; renderNew(); });
+    });
+    var al = $('#addLandlord');
+    if (al) al.addEventListener('click', function () { form.landlordSigners.push({ name: '', email: '', mobile: '' }); renderNew(); });
     var at = $('#addTenant');
     if (at) at.addEventListener('click', function () { form.tenants.push({ name: '', email: '', mobile: '', idType: 'Driver licence', idNumber: '', dob: '' }); renderNew(); });
     $('#clearForm').addEventListener('click', function () { if (confirm('Clear everything in this form?')) { form = blankForm(); renderNew(); } });
@@ -384,7 +405,7 @@
   function payload() {
     var t = form.terms;
     return {
-      propertyAddress: form.propertyAddress, landlord: form.landlord, source: form.source,
+      propertyAddress: form.propertyAddress, landlord: form.landlord, landlordSigners: form.landlordSigners, source: form.source,
       terms: {
         rentPerWeek: t.rentPerWeek, bond: t.bond, startDate: t.startDate, endDate: t.length === 'Periodic' ? '' : t.endDate,
         maxOccupants: t.maxOccupants, rentPaymentDetails: t.rentPaymentDetails, chattels: t.chattels, insurer: t.insurer,
@@ -415,8 +436,10 @@
     var b = $('#sendBtn');
     var local = ESign.validateCreate(payload(), new Date().toISOString().slice(0, 10));
     if (local.errors.length) { showErrs(local.errors, local.warnings); $('#newErrs').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-    var names = form.tenants.map(function (t, i) { return (i + 1) + '. ' + t.name; }).join('\n');
-    if (!confirm('Send for signing?\n\n' + names + '\n' + (form.tenants.length + 1) + '. ' + (form.landlord.signerName || form.landlord.name) + ' (landlord)\n\n' + form.tenants[0].name + ' will be emailed first. The terms are locked once sent.')) return;
+    var names = form.tenants.map(function (t) { return t.name; })
+      .concat(form.landlordSigners.map(function (s) { return s.name + ' (for the landlord)'; }))
+      .map(function (n, i) { return (i + 1) + '. ' + n; }).join('\n');
+    if (!confirm('Send for signing?\n\n' + names + '\n\n' + form.tenants[0].name + ' will be emailed first. The terms are locked once sent.')) return;
     UI.busy(b, true, 'Sending...');
     ESignApi.call('admin.create', { input: payload() }).then(function (r) {
       form = null;

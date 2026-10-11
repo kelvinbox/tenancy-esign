@@ -5,12 +5,17 @@
 var DemoData = {
   landlords: [
     {
-      name: 'Owner Family Trust', signerName: 'Sam Owner', email: 'sam.owner@example.com',
-      phone: '03 000 0100', mobile: '021 000 0100', addressForService: '9 Sample Terrace, Maori Hill, Dunedin'
+      name: 'Owner Family Trust', email: 'sam.owner@example.com',
+      phone: '03 000 0100', mobile: '021 000 0100', addressForService: '9 Sample Terrace, Maori Hill, Dunedin',
+      signers: [
+        { name: 'Sam Owner', email: 'sam.owner@example.com', mobile: '021 000 0100' },
+        { name: 'Pat Owner', email: 'pat.owner@example.com', mobile: '022 000 0200' }
+      ]
     },
     {
-      name: 'Pat Owner', signerName: 'Pat Owner', email: 'pat.owner@example.com',
-      phone: '', mobile: '022 000 0200', addressForService: '9 Sample Terrace, Maori Hill, Dunedin'
+      name: 'Pat Owner', email: 'pat.owner@example.com',
+      phone: '', mobile: '022 000 0200', addressForService: '9 Sample Terrace, Maori Hill, Dunedin',
+      signers: [{ name: 'Pat Owner', email: 'pat.owner@example.com', mobile: '022 000 0200' }]
     }
   ],
   properties: [

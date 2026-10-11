@@ -97,6 +97,44 @@ test('full signing flow: in order, landlord last, chain intact, document fingerp
   full.signers.forEach(s => assert.ok(s.signature.recordHash));
 });
 
+test('two landlord signers sign after the tenants, in order', () => {
+  const b = memoryBackend();
+  const input = sampleInput({
+    landlordSigners: [
+      { name: 'Sam Owner', email: 'sam@example.com', mobile: '021 000 0100' },
+      { name: 'Pat Owner', email: 'pat@example.com', mobile: '022 000 0200' }
+    ]
+  });
+  const res = b.call({ action: 'admin.create', input });
+  const id = res.agreement.id;
+  assert.deepEqual(res.agreement.signers.map(s => s.role), ['Tenant1', 'Tenant2', 'Landlord1', 'Landlord2']);
+  assert.equal(res.agreement.progress, '0/4');
+
+  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')));
+  assert.equal(b.lastEmail('pat@example.com', 'invite'), undefined, 'second landlord waits for the first');
+  const v1 = signAs(b, b.tokenFrom(b.lastEmail('sam@example.com', 'invite')), { details: { capacity: 'Trustee' } });
+  assert.equal(v1.agreement.status, 'Sent');
+  assert.equal(v1.me.roleLabel, 'Landlord 1');
+  const v2 = signAs(b, b.tokenFrom(b.lastEmail('pat@example.com', 'invite')), { details: { capacity: 'Trustee' } });
+  assert.equal(v2.agreement.status, 'Completed');
+
+  const html = Object.values(b.db.finals)[0];
+  assert.ok(html.includes('Trustee &ndash; for Example Family Trust'));
+  assert.ok(html.includes('Landlord 2: Pat Owner'));
+  assert.ok(b.db.outbox.some(m => m.kind === 'completed' && m.to === 'pat@example.com'));
+  assert.equal(b.call({ action: 'admin.get', id }).chain.ok, true);
+});
+
+test('landlord signer validation: at most 2, unique emails', () => {
+  const three = sampleInput({ landlordSigners: [1, 2, 3].map(n => ({ name: 'L' + n, email: `l${n}@example.com` })) });
+  assert.ok(ESign.validateCreate(three, '2026-10-11').errors.some(e => e.includes('At most 2')));
+  const dup = sampleInput({ landlordSigners: [{ name: 'Sam', email: 'mia@example.com' }] });
+  assert.ok(ESign.validateCreate(dup, '2026-10-11').errors.some(e => e.includes('own email')));
+  const noEmail = sampleInput({ landlordSigners: [{ name: 'Sam', email: 's@example.com' }, { name: 'Pat', email: '' }] });
+  assert.ok(ESign.validateCreate(noEmail, '2026-10-11').errors.some(e => e.includes('Landlord signer 2 (Pat)')));
+});
+
 test('tampering with any audit event breaks the chain', () => {
   const b = memoryBackend();
   const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;

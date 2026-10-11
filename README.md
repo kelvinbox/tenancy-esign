@@ -17,7 +17,7 @@ Open http://localhost:8080/. To try it on your iPhone, keep the phone on the sam
 1. **New** tab: choose the approved group "Mia, Tūi and Jordan", check the pre-filled terms, tap **Preview**, then **Send for signing**.
 2. **Outbox** tab: open Mia's "Please sign" email and tap **Open signing link**.
 3. Sign as Mia: agree to e-signing → get the code (demo mode shows it on screen) → read to the end → confirm details → draw a signature and type your name.
-4. Back in the Outbox, Tūi's invite has appeared (signing is sequential). Repeat for each tenant, then the landlord (who signs last).
+4. Back in the Outbox, Tūi's invite has appeared (signing is sequential). Repeat for each tenant, then the two landlord signers (Sam, then Pat), who sign last.
 5. Open the agreement in **Agreements** to see each signer's progress, the locked terms fingerprint and the full audit trail. Open the signed document and scroll to the **signing certificate**.
 6. **Verify** tab: choose the downloaded signed file to check it's an unaltered copy. Change one character in it and check again to see it fail.
 
@@ -53,7 +53,7 @@ Sections 226 to 228 of the Contract and Commercial Law Act 2017 set this out. Se
 | **Changes are detectable** | Every event is appended to an audit log, and each entry includes the hash of the one before (a hash chain). Editing, deleting or reordering any event breaks the chain. The console shows "Audit trail intact" or names the event where it breaks. |
 | **Independent evidence** | When everyone has signed, a document is produced: the agreement with signatures, followed by a **signing certificate** listing each signer's verification times, device, reported IP, signature and hashes, and the full audit trail. Its SHA-256 fingerprint and the audit hash are emailed to every party with their copy. Those emails sit in the tenants' own inboxes, outside the owner's control. |
 | **Anyone can check a copy** | `verify.html` works out a file's fingerprint on the device and looks it up. A match means it is the exact signed file. |
-| **Order and timing** | Signing is sequential (Tenant 1 → … → Landlord last). Each person is emailed automatically when it's their turn. Links expire after 14 days. Server timestamps are in UTC and shown in NZ time. |
+| **Order and timing** | Signing is sequential (Tenant 1 → … → Landlord 1 → Landlord 2). Each person is emailed automatically when it's their turn. Links expire after 14 days. Server timestamps are in UTC and shown in NZ time. |
 
 ### Honest limitations
 
@@ -87,7 +87,7 @@ Every action is a `POST` to the web app URL with a JSON body and `Content-Type: 
 
 | DocHub step today | Replacement |
 |---|---|
-| Create a sign request from the template, delete unused roles, fill fields, send | `admin.create` with `input: {propertyAddress, landlord, terms, tenants[], source}`. Up to 5 tenants; unused slots simply don't exist. The validation from the brief is built in: at least one tenant, unique emails, bond ≤ 4 weeks' rent, landlord email and phone, end date after start. |
+| Create a sign request from the template, delete unused roles, fill fields, send | `admin.create` with `input: {propertyAddress, landlord, landlordSigners[], terms, tenants[], source}`. Up to 5 tenants and 1–2 landlord signers (e.g. co-owners or two trustees), each with their own link and code; unused slots simply don't exist. A single signer can still be sent the old way, as `landlord.signerName` + `landlord.email`. The validation from the brief is built in: at least one tenant, unique emails, bond ≤ 4 weeks' rent, landlord email and phone, end date after start. |
 | "Check status" (n/m signed, per-signer sent / opened / signed) | `admin.get` → `agreement.progress`, `signers[].status`, plus timestamps for sent, opened, verified, read and signed. Or set `WEBHOOK_URL` to be told on sent / signed / completed / declined / cancelled / expired. |
 | Cancel / void | `admin.cancel` with a reason. Tenants who were already sent a link are emailed. |
 | Resend | `admin.issueLink` with `channel: email`, `sms` (returns the text to open in Messages) or `copy` |

@@ -19,6 +19,7 @@ var ESign = (function () {
   var VERSION = '0.1.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var MAX_TENANTS = 5;
+  var MAX_LANDLORD_SIGNERS = 2;
 
   var CONSENT_TEXT = 'I agree to receive this tenancy agreement and related notices electronically, ' +
     'and to sign it with an electronic signature. I understand that my electronic signature is ' +
@@ -70,7 +71,7 @@ var ESign = (function () {
     return user.charAt(0) + '***@' + host.charAt(0) + '***' + rest;
   }
 
-  function roleLabel(role) { return String(role).replace(/^Tenant(\d)$/, 'Tenant $1'); }
+  function roleLabel(role) { return String(role).replace(/^(Tenant|Landlord)(\d)$/, '$1 $2'); }
 
   /* =====================================================================
    * SHA-256 (pure JS, synchronous, so it behaves the same everywhere)
@@ -243,9 +244,24 @@ var ESign = (function () {
       source: input.source ? clone(input.source) : null
     };
 
+    // Up to 2 people sign for the landlord (e.g. co-owners or two trustees). Older callers send a
+    // single signer as landlord.signerName + landlord.email, which still works.
+    var ls = Array.isArray(input.landlordSigners) && input.landlordSigners.length ? input.landlordSigners :
+      [{ name: str(L.signerName) || str(L.name), email: L.email, mobile: L.mobile }];
+    if (ls.length > MAX_LANDLORD_SIGNERS) errors.push('At most ' + MAX_LANDLORD_SIGNERS + ' people can sign for the landlord.');
+    v.landlordSigners = ls.slice(0, MAX_LANDLORD_SIGNERS).map(function (s, i) {
+      var sv = { name: str(s.name), email: normEmail(s.email), mobile: str(s.mobile) };
+      var who = ls.length > 1 ? 'Landlord signer ' + (i + 1) : 'The person signing for the landlord';
+      if (!sv.name) errors.push(who + ' needs a name.');
+      if (!isEmail(sv.email)) errors.push(who + ' (' + (sv.name || 'no name') + ') needs a valid email address.');
+      return sv;
+    });
+    if (!v.landlord.email && v.landlordSigners.length) v.landlord.email = v.landlordSigners[0].email;
+    v.landlord.signerName = v.landlordSigners.map(function (s) { return s.name; }).join(' and ');
+
     if (!v.propertyAddress) errors.push('Enter the rental address.');
     if (!v.landlord.name) errors.push('Enter the landlord\'s name.');
-    if (!isEmail(v.landlord.email)) errors.push('Enter a valid email address for the landlord (they sign last).');
+    if (!isEmail(v.landlord.email)) errors.push('Enter a valid contact email address for the landlord.');
     if (!v.landlord.phone && !v.landlord.mobile) errors.push('Enter a phone or mobile number for the landlord.');
     if (!v.landlord.addressForService) errors.push('Enter the landlord\'s address for service.');
 
@@ -318,7 +334,7 @@ var ESign = (function () {
     });
 
     var seen = {};
-    v.tenants.concat([{ name: 'the landlord', email: v.landlord.email }]).forEach(function (p) {
+    v.tenants.concat(v.landlordSigners.map(function (s) { return { name: s.name + ' (landlord)', email: s.email }; })).forEach(function (p) {
       if (!p.email) return;
       if (seen[p.email]) errors.push('Every signer needs their own email address: ' + p.email + ' is used by ' + seen[p.email] + ' and ' + p.name + '.');
       else seen[p.email] = p.name;
@@ -348,9 +364,21 @@ var ESign = (function () {
     ],
     landlord: [
       { key: 'name', label: 'Your full name', required: true, hint: 'The person signing for the landlord.' },
-      { key: 'capacity', label: 'Signing as', required: true, type: 'select', options: ['Landlord', 'Agent for the landlord'] }
+      { key: 'capacity', label: 'Signing as', required: true, type: 'select', options: ['Landlord', 'Co-owner', 'Trustee', 'Agent for the landlord'] }
     ]
   };
+
+  /** Landlord signers sign after the tenants. One signer keeps the plain "Landlord" role. */
+  function landlordSignerRecords(v) {
+    var two = v.landlordSigners.length > 1;
+    return v.landlordSigners.map(function (ls, i) {
+      return {
+        id: two ? 'L' + (i + 1) : 'L', role: two ? 'Landlord' + (i + 1) : 'Landlord', kind: 'landlord',
+        order: v.tenants.length + i + 1, email: ls.email, status: 'Waiting',
+        prefill: { name: ls.name, email: ls.email, mobile: ls.mobile, capacity: 'Landlord' }
+      };
+    });
+  }
 
   function validateDetails(kind, input, prefill) {
     input = input || {};
@@ -608,7 +636,7 @@ var ESign = (function () {
       kvRow('Created', esc(fmt(env.createdAt)) + ' by ' + esc(env.createdBy || 'landlord')) +
       kvRow('Template', esc(env.template.title) + ' v' + esc(env.template.version) + ' (' + esc(env.template.id) + ')') +
       kvRow('Signing method', 'Personal link sent to each signer\'s email; email address verified with a one-time code before signing; ' +
-        'agreement to sign electronically recorded; agreement read to the end; drawn signature plus typed full name; signers signed in order, landlord last.') +
+        'agreement to sign electronically recorded; agreement read to the end; drawn signature plus typed full name; signers signed in order, tenants first and the landlord\'s signer(s) last.') +
       '</table>';
     h += '<h3>Fingerprints (SHA-256)</h3>';
     h += '<div class="fp"><b>Agreement terms</b> (locked when sent; every signer signed this exact version):<div class="mono">' + esc(env.termsHash) + '</div></div>';
@@ -986,10 +1014,7 @@ var ESign = (function () {
           dob: tn.dob || null, status: 'Waiting'
         });
       });
-      env.signers.push({
-        id: 'L', role: 'Landlord', kind: 'landlord', order: v.tenants.length + 1, email: v.landlord.email,
-        prefill: { name: v.landlord.signerName, email: v.landlord.email, capacity: 'Landlord' }, status: 'Waiting'
-      });
+      env.signers = env.signers.concat(landlordSignerRecords(v));
       env.termsHash = termsHashOf(env);
 
       audit(env, 'AGREEMENT_CREATED', actor || 'landlord', {
@@ -1335,8 +1360,7 @@ var ESign = (function () {
           signers: v.tenants.map(function (tn, i) {
             return { id: 'T' + (i + 1), role: 'Tenant' + (i + 1), kind: 'tenant', email: tn.email, status: 'Waiting',
               prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, under18: tn.under18 } };
-          }).concat([{ id: 'L', role: 'Landlord', kind: 'landlord', email: v.landlord.email, status: 'Waiting',
-            prefill: { name: v.landlord.signerName, capacity: 'Landlord' } }])
+          }).concat(landlordSignerRecords(v))
         };
         return { errors: r.errors, warnings: r.warnings, html: renderPreviewHtml(env) };
       },
