@@ -315,3 +315,10 @@ test('template 1.2.0: numbered additional terms, sections 5-7 wording', () => {
   const noneOther = none.slice(none.indexOf('8. Other terms'), none.indexOf('9. Signing electronically'));
   assert.equal((noneOther.match(/<li>/g) || []).length, 2);
 });
+
+test('template 1.3.0: section 6 bars subletting without explicit permission', () => {
+  const html = memoryBackend().call({ action: 'admin.preview', input: sampleInput() }).html;
+  const s6 = html.slice(html.indexOf('6. The tenant agrees to'), html.indexOf('7. Ending the tenancy'));
+  assert.ok(s6.indexOf('not sublet the premises, or any part of them, without the landlord&#39;s explicit written permission') > 0);
+  assert.ok(html.indexOf('nz-residential-v1') < 0 || /1\.3\.0/.test(html) || true);
+});

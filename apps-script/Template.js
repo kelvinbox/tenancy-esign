@@ -25,7 +25,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.2.0',
+    version: '1.3.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -122,6 +122,7 @@ var ESignTemplates = (function () {
             'not disturb the neighbours\' peace, comfort or privacy',
             'not make changes to the premises without the landlord\'s written consent',
             'not let more than the maximum number of occupants live at the premises',
+            'not sublet the premises, or any part of them, without the landlord\'s explicit written permission',
             'at the end of the tenancy, leave the premises reasonably clean and tidy, remove all their belongings and rubbish, and return all keys and remotes'
           ]
         }]
