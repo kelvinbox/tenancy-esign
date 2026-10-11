@@ -341,13 +341,18 @@
     });
     $('#chgSend').addEventListener('click', function () {
       var b = $('#chgSend');
-      if (!confirm('Send this change for signing?\n\n' + order.map(function (n, i) { return (i + 1) + '. ' + n; }).join('\n') + '\n\nNo other change can start until this one finishes.')) return;
-      UI.busy(b, true, 'Sending...');
-      ESignApi.call('admin.createVariation', { input: changeInput() }).then(function (r) {
-        UI.toast('Sent. ' + r.agreement.signers[0].name + ' has been emailed a signing link.', 'ok');
-        changeFor = null; changeForm = null; detailId = r.agreement.id;
-        render();
-      }).catch(function (e) { UI.busy(b, false); showChgErrs([e.message]); });
+      UI.ask({
+        title: 'Send this change for signing?', message: 'They sign in this order:', list: order,
+        note: 'No other change can start until this one finishes.', ok: 'Send for signing'
+      }).then(function (yes) {
+        if (!yes) return;
+        UI.busy(b, true, 'Sending...');
+        ESignApi.call('admin.createVariation', { input: changeInput() }).then(function (r) {
+          UI.toast('Sent. ' + r.agreement.signers[0].name + ' has been emailed a signing link.', 'ok');
+          changeFor = null; changeForm = null; detailId = r.agreement.id;
+          render();
+        }).catch(function (e) { UI.busy(b, false); showChgErrs([e.message]); });
+      });
     });
   }
 
@@ -389,8 +394,14 @@
   }
 
   function issueLink(a, signerId, channel, mobile, btn) {
-    var warn = channel === 'email' ? '' : 'A new link will be made. Any earlier link for this person stops working.';
-    if (warn && !confirm(warn)) return;
+    if (channel === 'email') return doIssueLink(a, signerId, channel, mobile, btn);
+    UI.ask({
+      title: channel === 'sms' ? 'Text a new signing link?' : 'Copy a new signing link?',
+      message: 'A new link will be made. Any earlier link for this person stops working.', ok: 'Make new link'
+    }).then(function (yes) { if (yes) doIssueLink(a, signerId, channel, mobile, btn); });
+  }
+
+  function doIssueLink(a, signerId, channel, mobile, btn) {
     UI.busy(btn, true, '...');
     ESignApi.call('admin.issueLink', { id: a.id, signerId: signerId, channel: channel }).then(function (r) {
       UI.busy(btn, false);
@@ -585,7 +596,10 @@
     if (al) al.addEventListener('click', function () { form.landlordSigners.push({ name: '', email: '', mobile: '' }); renderNew(); });
     var at = $('#addTenant');
     if (at) at.addEventListener('click', function () { form.tenants.push({ name: '', email: '', mobile: '', idType: 'Driver licence', idNumber: '', dob: '' }); renderNew(); });
-    $('#clearForm').addEventListener('click', function () { if (confirm('Clear everything in this form?')) { form = blankForm(); renderNew(); } });
+    $('#clearForm').addEventListener('click', function () {
+      UI.ask({ title: 'Clear the form?', message: 'Everything you have entered here will be removed.', ok: 'Clear', danger: true })
+        .then(function (yes) { if (yes) { form = blankForm(); renderNew(); } });
+    });
     $('#previewBtn').addEventListener('click', preview);
     $('#sendBtn').addEventListener('click', send);
   }
@@ -624,10 +638,16 @@
     var b = $('#sendBtn');
     var local = ESign.validateCreate(payload(), new Date().toISOString().slice(0, 10));
     if (local.errors.length) { showErrs(local.errors, local.warnings); $('#newErrs').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    showErrs([], local.warnings);
     var names = form.tenants.map(function (t) { return t.name; })
-      .concat(form.landlordSigners.map(function (s) { return s.name + ' (for the landlord)'; }))
-      .map(function (n, i) { return (i + 1) + '. ' + n; }).join('\n');
-    if (!confirm('Send for signing?\n\n' + names + '\n\n' + form.tenants[0].name + ' will be emailed first. The terms are locked once sent.')) return;
+      .concat(form.landlordSigners.map(function (s) { return s.name + ' (for the landlord)'; }));
+    UI.ask({
+      title: 'Send for signing?', message: 'They sign in this order:', list: names,
+      note: form.tenants[0].name + ' will be emailed first. The terms are locked once sent.', ok: 'Send for signing'
+    }).then(function (yes) { if (yes) doSend(b); });
+  }
+
+  function doSend(b) {
     UI.busy(b, true, 'Sending...');
     ESignApi.call('admin.create', { input: payload() }).then(function (r) {
       form = null;
@@ -697,9 +717,11 @@
       ESignApi.call('admin.list').then(function (l) { UI.busy(t, false); UI.toast('Connected. ' + l.length + ' agreements.', 'ok'); }).catch(function (e) { UI.busy(t, false); UI.toast(e.message, 'error'); });
     });
     var r = $('#resetDemo'); if (r) r.addEventListener('click', function () {
-      if (!confirm('Delete all demo agreements and the outbox from this browser?')) return;
-      DemoBackend.reset(); outboxSeen = 0; try { localStorage.setItem('esign-outbox-seen', '0'); } catch (e) { /* */ }
-      UI.toast('Demo data cleared.', 'ok'); go('list');
+      UI.ask({ title: 'Reset demo data?', message: 'Delete all demo agreements and the outbox from this browser?', ok: 'Reset', danger: true }).then(function (yes) {
+        if (!yes) return;
+        DemoBackend.reset(); outboxSeen = 0; try { localStorage.setItem('esign-outbox-seen', '0'); } catch (e) { /* */ }
+        UI.toast('Demo data cleared.', 'ok'); go('list');
+      });
     });
   }
 

@@ -150,6 +150,24 @@ var UI = (function () {
     return { el: wrap, close: close };
   }
 
+  /**
+   * In-page confirmation (native confirm() is silently blocked by some phone and in-app browsers).
+   * opts: {title, message, list[], ok, danger}. Resolves true or false.
+   */
+  function ask(opts) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var body = (opts.message ? '<p>' + esc(opts.message) + '</p>' : '') +
+        (opts.list && opts.list.length ? '<ol class="small" style="padding-left:20px;margin:6px 0 12px">' + opts.list.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>' : '') +
+        (opts.note ? '<p class="small muted">' + esc(opts.note) + '</p>' : '') +
+        '<div class="btn-row" style="margin-top:12px"><button class="btn ghost" data-ask="no">' + esc(opts.cancel || 'Cancel') + '</button>' +
+        '<button class="btn' + (opts.danger ? ' danger' : '') + '" data-ask="yes">' + esc(opts.ok || 'OK') + '</button></div>';
+      var m = modal(body, { title: opts.title || 'Are you sure?', onClose: function () { if (!done) { done = true; resolve(false); } } });
+      $('[data-ask=yes]', m.el).addEventListener('click', function () { done = true; m.close(); resolve(true); });
+      $('[data-ask=no]', m.el).addEventListener('click', function () { m.close(); });
+    });
+  }
+
   function downloadB64(file) {
     var bin = atob(file.base64), bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -174,5 +192,5 @@ var UI = (function () {
     return '<span class="pill ' + cls + '">' + esc(label) + '</span>';
   }
 
-  return { $: $, $all: $all, esc: esc, when: when, whenLong: whenLong, toast: toast, copy: copy, busy: busy, modal: modal, downloadB64: downloadB64, openB64: openB64, statusPill: statusPill };
+  return { $: $, $all: $all, esc: esc, when: when, whenLong: whenLong, toast: toast, copy: copy, busy: busy, modal: modal, ask: ask, downloadB64: downloadB64, openB64: openB64, statusPill: statusPill };
 })();
