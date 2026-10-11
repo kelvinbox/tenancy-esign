@@ -322,3 +322,10 @@ test('template 1.3.0: section 6 bars subletting without explicit permission', ()
   assert.ok(s6.indexOf('not sublet the premises, or any part of them, without the landlord&#39;s explicit written permission') > 0);
   assert.ok(html.indexOf('nz-residential-v1') < 0 || /1\.3\.0/.test(html) || true);
 });
+
+test('template 1.4.0: no smoking or vaping in or on the premises', () => {
+  const html = memoryBackend().call({ action: 'admin.preview', input: sampleInput() }).html;
+  const other = html.slice(html.indexOf('8. Other terms'), html.indexOf('9. Signing electronically'));
+  assert.ok(other.indexOf('Smoking and vaping are not allowed in or on the premises.') > 0);
+  assert.ok(html.indexOf('inside the premises') < 0, 'old wording gone');
+});

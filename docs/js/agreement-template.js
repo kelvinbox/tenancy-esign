@@ -24,7 +24,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.3.0',
+    version: '1.4.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -143,7 +143,7 @@ var ESignTemplates = (function () {
         blocks: [
           {
             type: 'list', items: [
-              'Smoking is not allowed inside the premises.',
+              'Smoking and vaping are not allowed in or on the premises.',
               'Pets: {{PetsText}}',
               { each: 'AdditionalTerms', when: 'HasAdditionalTerms' }
             ]
