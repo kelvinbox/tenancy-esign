@@ -33,14 +33,23 @@ test('add a tenant: joining tenant first, then existing tenants, then landlord; 
   assert.equal(b.call({ action: 'admin.get', id }).tenancy.canChange, false);
   assert.throws(() => b.call({ action: 'admin.createVariation', input: { parentId: id, effectiveDate: '2026-12-01', remove: ['tui@example.net'], bondArrangement: 'x' } }), /already out for signing/);
 
-  // The joining tenant reads the whole agreement as an annex; continuing tenants don't need to.
+  // The joining tenant reads the original exactly as it was signed (not re-rendered with new
+  // tenants) and signs a statement binding them to it; continuing tenants just read the variation.
   const rv = b.call({ action: 'sign.open', token: lastInvite(b, 'riley@example.com') });
-  assert.ok(rv.document.sections.some(s => s.id === 'annex-rent'), 'annex shown to joining tenant');
+  const refRent = rv.document.sections.find(s => s.id === 'ref-1-rent');
+  assert.ok(refRent, 'signed original shown to joining tenant');
+  const refParties = rv.document.sections.find(s => s.id === 'ref-1-parties');
+  assert.ok(refParties.html.includes('Mia Example') && !refParties.html.includes('Riley'), 'original shown as signed, not updated');
+  assert.match(rv.document.sections.find(s => s.id === 'ref-intro').heading, /not being re-signed/);
+  assert.match(rv.agreeText, /as if I had signed the original agreement/);
   assert.match(rv.agreement.changeSummary, /Riley Sample is joining on 1st December 2026/);
 
   signAs(b, lastInvite(b, 'riley@example.com'));
+  const signedEv = b.call({ action: 'admin.get', id: vid }).events.find(e => e.type === 'SIGNED');
+  assert.match(signedEv.details.statement, /bound by all of its terms/);
   const mv = b.call({ action: 'sign.open', token: lastInvite(b, 'mia@example.com') });
-  assert.ok(!mv.document.sections.some(s => s.id === 'annex-rent'));
+  assert.ok(!mv.document.sections.some(s => s.id.startsWith('ref-')));
+  assert.match(mv.agreeText, /I have read this variation/);
   signAs(b, lastInvite(b, 'mia@example.com'));
   signAs(b, lastInvite(b, 'tui@example.net'));
   const done = signAs(b, lastInvite(b, 'landlord@example.com'));
@@ -59,20 +68,33 @@ test('add a tenant: joining tenant first, then existing tenants, then landlord; 
   assert.ok(o.events.some(e => e.type === 'SUPERSEDED'));
   assert.equal(o.tenancy.canChange, false);
 
-  // The signed change carries the parent fingerprint and the annex.
+  // The signed variation incorporates the original by fingerprint and does not restate it.
   const html = b.db.finals['fin-' + vid];
   assert.ok(html.includes(o.agreement.final.sha256));
-  assert.ok(html.includes('Annex: the tenancy agreement as it stands after this change'));
+  assert.ok(html.includes('Variation of Tenancy Agreement: Change of Tenants'));
+  assert.ok(html.includes('It is not a new tenancy agreement'));
+  assert.ok(!html.includes('Residential Tenancy Agreement<'), 'no re-rendered agreement inside the variation');
+  assert.ok(!html.includes('The landlord agrees to'), 'agreement clauses are not repeated');
+
+  // The joining tenant is emailed the original signed agreement as well as the variation.
+  const rileyCopy = b.db.outbox.find(m => m.kind === 'completed' && m.to === 'riley@example.com');
+  assert.deepEqual(rileyCopy.attachments.map(a => a.ref), ['fin-' + vid, 'fin-' + id]);
+  assert.match(rileyCopy.text, /signed documents that make up the tenancy agreement you have joined/);
+  const miaCopy = b.db.outbox.find(m => m.kind === 'completed' && m.to === 'mia@example.com' && m.subject.includes('variation'));
+  assert.equal(miaCopy.attachments.length, 1);
+  assert.ok(b.call({ action: 'admin.get', id: vid }).events.find(e => e.type === 'COPIES_SENT').details.joiningTenantsAlsoSent);
 
   // Verify: the original is found, but flagged as replaced.
   const vo = b.call({ action: 'verify', sha256: o.agreement.final.sha256 });
   assert.equal(vo.supersededBy.id, vid);
   assert.equal(vo.history.length, 2);
 
-  // Consolidated reading copy shows the current tenants and the version list.
-  const cur = b.call({ action: 'admin.current', id });
-  assert.equal(cur.version, 2);
-  assert.ok(cur.html.includes('Riley Sample') && cur.html.includes('Reading copy, not a signed document'));
+  // The tenancy summary is a cover sheet, not an agreement.
+  const sum = b.call({ action: 'admin.summary', id });
+  assert.equal(sum.version, 2);
+  assert.ok(sum.html.includes('Riley Sample') && sum.html.includes('not a signed document and not a tenancy agreement'));
+  assert.ok(sum.html.includes(o.agreement.final.sha256));
+  assert.ok(!sum.html.includes('The landlord agrees to'));
 });
 
 test('swap a tenant: leaving tenant gives a forwarding address; the result replaces them', () => {
@@ -152,7 +174,7 @@ test('preview of a change renders without sending anything', () => {
   const before = b.db.outbox.length;
   const p = b.call({ action: 'admin.previewVariation', input: { parentId: id, effectiveDate: '2026-12-01', add: [riley], bondArrangement: 'Top-up.' } });
   assert.deepEqual(p.errors, []);
-  assert.ok(p.html.includes('Change of Tenants') && p.html.includes('Riley Sample') && p.html.includes('Annex'));
+  assert.ok(p.html.includes('Variation of Tenancy Agreement') && p.html.includes('Riley Sample') && !p.html.includes('Annex'));
   assert.equal(b.db.outbox.length, before);
   assert.equal(b.call({ action: 'admin.get', id }).tenancy.canChange, true);
   assert.equal(ESign.roleLabel('LeavingTenant1'), 'Leaving tenant 1');

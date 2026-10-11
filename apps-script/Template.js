@@ -162,21 +162,29 @@ var ESignTemplates = (function () {
   };
 
   /*
-   * Change of tenants (a variation of a signed agreement). Each one refers to the exact signed
-   * document it changes by its SHA-256 fingerprint, so the versions form a chain. Joining tenants
-   * also read an annex: the full agreement as it stands after the change.
-   * Block types used only here: parentRef, changes, tenantsAfter.
+   * Change of tenants: a variation of a signed agreement, never a new agreement. It lists the
+   * signed documents it amends by SHA-256 fingerprint (incorporation by reference), so the versions
+   * form a chain. Joining tenants read those signed documents in full before signing and are
+   * emailed copies of them.
+   * Block types used only here: documents, changes, tenantsAfter.
    */
   T['nz-change-of-tenants-v1'] = {
     id: 'nz-change-of-tenants-v1',
-    version: '1.0.0',
-    title: 'Change of Tenants',
-    subtitle: 'Variation of a residential tenancy agreement (Residential Tenancies Act 1986)',
-    intro: 'This document changes who the tenants are under the tenancy agreement identified below. Apart from the changes set out here, ' +
-      'every term of that agreement stays the same and continues to apply. The tenancy continues: this is not a new tenancy, ' +
-      'and the start date, any fixed term, the rent and the other terms are unchanged.',
+    version: '2.0.0',
+    title: 'Variation of Tenancy Agreement: Change of Tenants',
+    subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
+    intro: 'This variation amends the residential tenancy agreement listed in section 1. It changes only who the tenants are. ' +
+      'It is not a new tenancy agreement and it does not create a new tenancy: the tenancy continues, and the start date, any fixed term, ' +
+      'the rent and every other term of the agreement stay the same.',
     sections: [
-      { id: 'agreement', heading: '1. The agreement being changed', blocks: [{ type: 'parentRef' }] },
+      {
+        id: 'documents', heading: '1. The agreement being varied',
+        blocks: [
+          { type: 'p', text: 'This variation amends the following signed documents, which together make up the tenancy agreement for {{PropertyAddress}}. Each is identified by its SHA-256 fingerprint, so there can be no doubt which document is meant.' },
+          { type: 'documents' },
+          { type: 'p', text: 'From the effective date, the tenancy agreement is made up of those documents as amended by this variation.' }
+        ]
+      },
       { id: 'change', heading: '2. The change', blocks: [{ type: 'changes' }] },
       {
         id: 'tenants-after', heading: '3. The tenants from the effective date',
@@ -207,18 +215,18 @@ var ESignTemplates = (function () {
         id: 'agreements', heading: '5. What each party agrees',
         blocks: [{
           type: 'list', items: [
-            { text: 'Each joining tenant has read the tenancy agreement (set out in the annex) and agrees to be bound by all of its terms from the effective date, together with the other tenants.', when: 'HasJoining' },
+            { text: 'Each joining tenant confirms that, before signing, they received a copy of every document listed in section 1 and read them. From the effective date each joining tenant becomes a tenant under the tenancy agreement as amended by this variation, and is bound by all of its terms, jointly with the other tenants, as if they had signed the original agreement. Each joining tenant will be given copies of those signed documents.', when: 'HasJoining' },
             { text: 'Each leaving tenant stops being a tenant on the effective date. They remain responsible for their obligations under the agreement up to that date, but not after it.', when: 'HasLeaving' },
             { text: 'Each continuing tenant agrees to this change and continues to be bound by the agreement.', when: 'HasContinuing' },
             'The landlord consents to this change. Where a tenant is leaving and another joining, this includes consent to the transfer of the leaving tenant\'s interest in the tenancy.',
-            'The rent, the tenancy dates and all other terms of the agreement are unchanged.'
+            'The rent, the tenancy dates and all other terms of the agreement are unchanged. If anything in this variation conflicts with the agreement, this variation applies only to who the tenants are.'
           ]
         }]
       },
       {
         id: 'electronic', heading: '6. Signing electronically',
         blocks: [
-          { type: 'p', text: 'The parties agree that this change may be signed electronically, one party after another in the order shown below, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The change takes effect only when every party has signed. Until then the agreement continues unchanged.' }
+          { type: 'p', text: 'The parties agree that this variation may be signed electronically, one party after another in the order shown below, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The variation takes effect only when every party has signed. Until then the agreement continues unchanged.' }
         ]
       },
       { id: 'signatures', heading: '7. Signatures', blocks: [{ type: 'signatures' }] }

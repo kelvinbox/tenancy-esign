@@ -43,7 +43,7 @@
     ESignApi.signerCall('sign.open', { token: token }).then(function (v) {
       view = v;
       $('#hdrSub').textContent = v.agreement.propertyAddress;
-      if (v.agreement.kind === 'variation') $('.hdr h1').textContent = 'Change of tenants';
+      if (v.agreement.kind === 'variation') $('.hdr h1').textContent = 'Tenancy variation';
       details = Object.assign({}, v.me.details);
       if (!v.me.consentAt) step = 'start';
       else if (!v.me.verified) step = 'verify';
@@ -96,7 +96,7 @@
       '<div class="card"><h2>Hi ' + esc(firstName()) + ' &#128075;</h2>' +
       '<p>' + esc(view.ownerName) + ' has sent you ' + esc(view.agreement.docLabel) + ' for <b>' + esc(view.agreement.propertyAddress) + '</b> to sign as <b>' + esc(view.me.roleLabel) + '</b>.</p>' +
       (view.agreement.changeSummary ? '<div class="info">' + esc(view.agreement.changeSummary) +
-        (view.me.kind === 'incoming' ? ' You\'ll read the full tenancy agreement you are joining before you sign.' :
+        (view.me.kind === 'incoming' ? ' You\'ll read the signed tenancy agreement you are joining before you sign. You won\'t be re-signing it: you sign a short variation that adds you to it.' :
           ' The rest of the agreement stays the same.') + '</div>' : '') +
       '<p class="muted small">It takes about 5 minutes. You\'ll check it\'s you with a code sent to your email, read the ' +
       (view.agreement.kind === 'variation' ? 'change' : 'agreement') + ', confirm your details, then sign with your finger.</p></div>' +

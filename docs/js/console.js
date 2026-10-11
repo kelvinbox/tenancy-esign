@@ -151,8 +151,8 @@
         h += '<div class="card"><h2>&#128101; Tenants now</h2><ul class="signers">' + ten.tenantsNow.map(function (t, i) {
           return '<li><span class="num done">' + (i + 1) + '</span><div class="grow"><b>' + esc(t.name) + '</b><div class="small muted">' + esc(t.email) + (t.ref ? ' &middot; ' + esc(t.ref) : '') + '</div></div></li>';
         }).join('') + '</ul><div class="btn-row" style="margin-top:10px"><button class="btn" id="changeBtn">&#128260; Change tenants</button>' +
-          '<button class="btn ghost" id="currentBtn">Current agreement</button></div>' +
-          '<p class="small muted">Add someone to fill a room, or replace someone who is leaving. Everyone affected signs a short change; the signed agreement itself never changes.</p></div>';
+          '<button class="btn ghost" id="currentBtn">Tenancy summary</button></div>' +
+          '<p class="small muted">Add someone to fill a room, or replace someone who is leaving. Everyone affected signs a short variation that amends it; the signed agreement itself never changes.</p></div>';
       }
       if (isVar) {
         var ch = a.change;
@@ -234,9 +234,9 @@
       var cb = $('#changeBtn'); if (cb) cb.addEventListener('click', function () { startChange(a, ten, d.terms); });
       var cu = $('#currentBtn'); if (cu) cu.addEventListener('click', function () {
         UI.busy(cu, true, 'Loading...');
-        ESignApi.call('admin.current', { id: a.id }).then(function (r) {
+        ESignApi.call('admin.summary', { id: a.id }).then(function (r) {
           UI.busy(cu, false);
-          var m = UI.modal('<iframe title="Current agreement"></iframe>', { title: 'Current agreement (version ' + r.version + ')', wide: true });
+          var m = UI.modal('<iframe title="Tenancy summary"></iframe>', { title: 'Tenancy summary (version ' + r.version + ')', wide: true });
           $('iframe', m.el).srcdoc = r.html;
         }).catch(function (e) { UI.busy(cu, false); UI.toast(e.message, 'error'); });
       });
@@ -677,7 +677,7 @@
         '<div class="small muted">To ' + esc(m.to) + ' &middot; ' + esc(UI.whenLong(m.at)) + '</div></div></div>' +
         (m.code ? '<div style="font-size:26px;font-weight:800;letter-spacing:5px;margin-top:6px">' + esc(m.code) + '</div>' : '') +
         (m.link ? '<div class="btn-row" style="margin-top:10px"><a class="btn small" target="_blank" href="' + esc(m.link) + '">Open signing link</a><button class="btn small ghost" data-copy="' + i + '">Copy link</button></div>' : '') +
-        (m.attachFinal ? '<div class="small" style="margin-top:6px">&#128206; Signed agreement attached</div>' : '') +
+        (m.attachments && m.attachments.length ? '<div class="small" style="margin-top:6px">' + m.attachments.map(function (n) { return '&#128206; ' + esc(n); }).join('<br>') + '</div>' : '') +
         '<details style="margin-top:6px"><summary class="small muted" style="cursor:pointer">Show message</summary><pre>' + esc(m.text) + '</pre></details></div>';
     });
     if (list.length) h += '<button class="btn link small" id="clearOutbox">Clear the outbox</button>';

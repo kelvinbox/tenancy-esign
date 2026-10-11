@@ -75,7 +75,7 @@ var DemoBackend = (function () {
     randomDigits: randomDigits,
     sendEmail: function (m) {
       var db = load();
-      db.outbox.unshift({ at: new Date().toISOString(), to: m.to, subject: m.subject, text: m.text, kind: m.kind, link: m.link || null, code: m.code || null, attachFinal: !!m.attachFinal });
+      db.outbox.unshift({ at: new Date().toISOString(), to: m.to, subject: m.subject, text: m.text, kind: m.kind, link: m.link || null, code: m.code || null, attachments: (m.attachments || []).map(function (a) { return a.name; }) });
       db.outbox = db.outbox.slice(0, 200);
       save(db);
     },

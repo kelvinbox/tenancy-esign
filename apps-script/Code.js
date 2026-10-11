@@ -202,7 +202,7 @@ function services_(p) {
     sendEmail: function (m) {
       var opts = { to: m.to, subject: m.subject, body: m.text, htmlBody: m.html, name: p.OWNER_NAME || 'The landlord' };
       if (p.OWNER_EMAIL && p.OWNER_EMAIL.toLowerCase() !== String(m.to).toLowerCase()) opts.replyTo = p.OWNER_EMAIL;
-      if (m.attachFinal && m.finalRef) opts.attachments = [DriveApp.getFileById(m.finalRef).getBlob()];
+      if (m.attachments && m.attachments.length) opts.attachments = m.attachments.map(function (a) { return DriveApp.getFileById(a.ref).getBlob(); });
       if (p.TEST_EMAIL_REDIRECT) {
         // Testing with invented people: every email goes to you instead, labelled with who it was for.
         opts.subject = '[for ' + m.to + '] ' + opts.subject;

@@ -194,6 +194,35 @@ test('Apps Script backend: full signing flow through doPost', () => {
   assert.ok(g.fetches.some(f => JSON.parse(f.o.payload).event === 'completed'));
 });
 
+test('Apps Script backend: a joining tenant is emailed the variation and the original signed PDF', () => {
+  const g = fakeGoogle();
+  g.ctx.setup();
+  const key = g.props.ADMIN_KEY;
+  const sign = (email, match) => {
+    const m = g.mails.filter(x => x.to === email && /Please sign/.test(x.subject) && (!match || match.test(x.subject))).slice(-1)[0];
+    const token = new URL(m.body.match(/https:\/\/\S+/)[0]).searchParams.get('t');
+    const open = g.post({ action: 'sign.open', token });
+    g.post({ action: 'sign.consent', token });
+    g.post({ action: 'sign.sendCode', token });
+    g.post({ action: 'sign.verifyCode', token, code: g.mails.slice(-1)[0].subject.slice(0, 6) });
+    g.post({ action: 'sign.reviewed', token, info: { termsHash: open.data.termsHash } });
+    const details = Object.assign({}, open.data.me.details, { addressForService: 'Here' });
+    const r = g.post({ action: 'sign.submit', token, payload: { details, typedName: details.name, agree: true, termsHash: open.data.termsHash, signaturePng: SIGNATURE, strokes: { count: 1 }, submissionId: email + Math.random() } });
+    assert.equal(r.ok, true, r.error);
+  };
+  const id = g.post({ action: 'admin.create', adminKey: key, input: sampleInput() }).data.agreement.id;
+  ['mia@example.com', 'tui@example.net', 'landlord@example.com'].forEach(e => sign(e));
+  const riley = { name: 'Riley Sample', email: 'riley@example.com', mobile: '021 000 1050', idType: 'Driver licence', idNumber: 'DX000050', dob: '1999-07-07', ref: 'KB-20050' };
+  const v = g.post({ action: 'admin.createVariation', adminKey: key, input: { parentId: id, effectiveDate: '2026-12-01', add: [riley], bondArrangement: 'Top-up.' } });
+  assert.equal(v.ok, true, v.error);
+  ['riley@example.com', 'mia@example.com', 'tui@example.net', 'landlord@example.com'].forEach(e => sign(e, /variation/));
+  const rileyMail = g.mails.find(m => m.to === 'riley@example.com' && /^Signed:/.test(m.subject));
+  assert.equal(rileyMail.attachments.length, 2);
+  assert.equal(Array.from(rileyMail.attachments, b => b.getName()).sort().join('|'), [id + ' signed.pdf', v.data.agreement.id + ' signed.pdf'].sort().join('|'));
+  const miaMail = g.mails.filter(m => m.to === 'mia@example.com' && /^Signed:/.test(m.subject)).slice(-1)[0];
+  assert.equal(miaMail.attachments.length, 1);
+});
+
 test('Apps Script backend: TEST_EMAIL_REDIRECT sends everything to the tester', () => {
   const g = fakeGoogle();
   g.ctx.setup();
