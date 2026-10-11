@@ -415,3 +415,18 @@ test('second landlord signer: mobile on the agreement; email only when allowed, 
   signAs(b, b.tokenFrom(b.lastEmail('landlord@example.com', 'invite')));
   assert.ok(b.lastEmail('pat@example.com', 'invite'), 'second signer gets their signing link');
 });
+
+test('admin.progress shows the agreement as it stands while out for signing, without changing it', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  const before = JSON.stringify(b.db.envelopes[id]), auditBefore = (b.db.audit[id] || []).length;
+  const r = b.call({ action: 'admin.progress', id });
+  assert.equal(r.signed, 1); assert.equal(r.signers, 3); assert.equal(r.status, 'Sent');
+  assert.match(r.html, /Progress preview, not a signed copy/);
+  assert.match(r.html, /1 of 3/);
+  assert.ok(r.html.indexOf('Mia Example') > 0 && /Signed /.test(r.html), 'the first tenant shows as signed');
+  assert.ok(/data:image\/png;base64/.test(r.html), 'their signature image is shown');
+  assert.ok(/not opened yet|not signed yet/.test(r.html), 'the next signer shows where they are up to');
+  assert.equal(JSON.stringify(b.db.envelopes[id]), before, 'nothing changed'); assert.equal((b.db.audit[id] || []).length, auditBefore, 'nothing audited');
+});

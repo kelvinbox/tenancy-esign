@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.13';
+  var VERSION = '0.3.14';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -955,6 +955,27 @@ var ESign = (function () {
     return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(env.title) + ' (' + esc(env.id) + ')</title>' +
       '<style>' + PRINT_CSS + '</style></head><body>' + renderAgreementBody(env, a) +
       '<div class="pb"></div>' + renderCertificate(env, events, opts) + '</body></html>';
+  }
+
+  /**
+   * Progress preview, for the landlord while it's out for signing: the document as it stands, with the signatures and
+   * details given so far, a status line for each signer, and a clear "not a signed copy" banner.
+   */
+  function renderProgressHtml(env, opts) {
+    opts = opts || {};
+    var fmt = opts.fmt || function (x) { return x; };
+    var a = renderAgreement(env, { mode: 'final', images: opts.images, fmt: fmt });
+    var done = env.signers.filter(function (s) { return s.status === 'Signed'; }).length;
+    var rows = env.signers.map(function (s) {
+      var d = signerDetails(s), when = s.signedAt ? 'Signed ' + fmt(s.signedAt) : s.reviewedAt ? 'Read it ' + fmt(s.reviewedAt) + ', not signed yet' :
+        s.openedAt ? 'Opened ' + fmt(s.openedAt) + ', not signed yet' : s.sentAt ? 'Sent ' + fmt(s.sentAt) + ', not opened yet' : 'Waiting for the people before them';
+      return '<tr><th>' + esc(roleLabel(s.role)) + '</th><td>' + esc(d.name) + '</td><td>' + esc(s.status === 'Declined' ? 'Declined' : when) + '</td></tr>';
+    }).join('');
+    var banner = '<div style="border:2px solid #b45309;background:#fffbeb;color:#78350f;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px">' +
+      '<b>Progress preview, not a signed copy.</b> ' + (env.kind === 'variation' ? 'This change of tenants' : 'This tenancy agreement') + ' is ' + esc(({ Sent: 'out for signing', Declined: 'declined', Cancelled: 'cancelled', Expired: 'expired', Completed: 'complete' })[env.status] || String(env.status || '').toLowerCase()) + ': ' + done + ' of ' + env.signers.length +
+      ' signed. Details and signatures below are as given so far.<table class="kv" style="margin-top:8px">' + rows + '</table></div>';
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Progress</title><style>' + PRINT_CSS +
+      '</style></head><body>' + banner + renderAgreementBody(env, a) + '</body></html>';
   }
 
   /** Unsigned preview, for the landlord before sending. */
@@ -1951,6 +1972,13 @@ var ESign = (function () {
         });
         return { deleted: all.map(function (e) { return e.id; }), by: actor || 'landlord' };
       },
+      /** The agreement as it stands while out for signing (see renderProgressHtml). Changes nothing. */
+      progress: function (id) {
+        var env = loadEnv(id), images = {};
+        env.signers.forEach(function (s) { if (s.status === 'Signed' && s.signature && s.signature.imageRef) { try { images[s.id] = svc.loadImage(s.signature.imageRef); } catch (e) { /* shown as "signed electronically" */ } } });
+        return { status: env.status, signed: env.signers.filter(function (s) { return s.status === 'Signed'; }).length, signers: env.signers.length,
+                 html: renderProgressHtml(env, { images: images, fmt: fmt }) };
+      },
       adminDownload: function (id) {
         var env = loadEnv(id);
         if (!env.final) fail('The signed document is created once everyone has signed.');
@@ -2018,6 +2046,7 @@ var ESign = (function () {
       case 'admin.cancel': return engine.cancel(req.id, req.reason, actor);
       case 'admin.download': return engine.adminDownload(req.id);
       case 'admin.purge': return engine.purge(req.id, actor);
+      case 'admin.progress': return engine.progress(req.id);
       case 'admin.previewVariation': return engine.previewVariation(req.input);
       case 'admin.createVariation': return engine.createVariation(req.input, actor);
       case 'admin.summary': return engine.tenancySummary(req.id);
