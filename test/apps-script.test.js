@@ -117,6 +117,17 @@ test('generated Apps Script copies match the shared sources', () => {
   }
 });
 
+test('every page loads its scripts and styles with the current version stamp', () => {
+  const v = build.appVersion();
+  for (const p of build.pages) {
+    const html = fs.readFileSync(path.join(build.root, p), 'utf8');
+    const refs = html.match(/(?:src|href)="(?:js|css)\/[^"]+"/g) || [];
+    assert.ok(refs.length > 0, p);
+    refs.forEach(r => assert.ok(r.endsWith('?v=' + v + '"'), p + ': ' + r + ' should end with ?v=' + v + ' (run npm run build)'));
+    assert.ok(html.includes('jsErr'), p + ' shows script errors on screen');
+  }
+});
+
 test('Apps Script backend: full signing flow through doPost', () => {
   const g = fakeGoogle();
   assert.equal(g.post({ action: 'admin.list' }).code, 'SETUP');

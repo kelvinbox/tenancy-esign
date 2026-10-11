@@ -19,11 +19,33 @@ function generated(src) {
   return banner.replace(/\{src\}/g, src) + fs.readFileSync(path.join(root, src), 'utf8');
 }
 
+/*
+ * Every script and stylesheet link in the pages carries ?v=<app version>. GitHub Pages lets
+ * browsers cache files for 10 minutes, and without this a phone can mix a new page script with
+ * an old cached helper (which broke "Send for signing"). Bump VERSION in core.js on every
+ * release and run the build.
+ */
+const pages = ['docs/index.html', 'docs/sign.html', 'docs/verify.html'];
+
+function appVersion() {
+  return /var VERSION = '([^']+)'/.exec(fs.readFileSync(path.join(root, 'docs/js/core.js'), 'utf8'))[1];
+}
+
+function stamped(html, version) {
+  return html.replace(/((?:src|href)="(?:js|css)\/[\w.-]+\.(?:js|css))(?:\?v=[^"]*)?"/g, '$1?v=' + version + '"');
+}
+
 if (require.main === module) {
   for (const [src, dest] of pairs) {
     fs.writeFileSync(path.join(root, dest), generated(src));
     console.log(`${src} -> ${dest}`);
   }
+  const v = appVersion();
+  for (const p of pages) {
+    const file = path.join(root, p);
+    fs.writeFileSync(file, stamped(fs.readFileSync(file, 'utf8'), v));
+    console.log(`${p} assets stamped ?v=${v}`);
+  }
 }
 
-module.exports = { pairs, generated, root };
+module.exports = { pairs, generated, root, pages, appVersion, stamped };
