@@ -44,7 +44,17 @@
         '<tr><th>Completed</th><td>' + esc(r.completedAtText) + '</td></tr>' +
         r.signers.map(function (s) { return '<tr><th>' + esc(s.roleLabel) + '</th><td>' + esc(s.name) + '<br><span class="small muted">signed ' + esc(s.signedAtText) + '</span></td></tr>'; }).join('') +
         '<tr><th>Audit trail</th><td>' + (r.chainOk ? '&#10003; intact (' + r.events + ' events)' : '&#9888;&#65039; altered since signing') + '</td></tr>' +
-        '</table></div><p class="small muted">Fingerprint<br><span class="mono">' + esc(hash) + '</span></p></div>';
+        '<tr><th>Version</th><td>' + r.version + ' of ' + r.history.length + (r.kind === 'variation' ? ' (change of tenants: ' + esc(r.changeSummary) + ')' : ' (original agreement)') + '</td></tr>' +
+        '<tr><th>Link to earlier versions</th><td>' + (r.linksOk ? '&#10003; each change matches the signed version before it' : '&#9888;&#65039; an earlier version no longer matches') + '</td></tr>' +
+        '</table></div>' +
+        (r.supersededBy ? '<div class="warn" style="margin-top:10px"><b>Not the current version.</b> This was replaced by version ' + r.supersededBy.version +
+          ' on ' + esc(r.supersededBy.atText) + '. It is still a genuine record of what was signed at the time.</div>' :
+          (r.history.length > 1 ? '<div class="ok-box" style="margin-top:10px">This is the current version of the tenancy.</div>' : '')) +
+        (r.history.length > 1 ? '<h3>All signed versions</h3><div class="doc"><table class="kv">' + r.history.map(function (v) {
+          return '<tr><th>Version ' + v.version + (v.current ? ' (current)' : '') + '</th><td>' + esc(v.label) + '<br><span class="small muted">' + esc(v.completedAtText) +
+            '</span><br><span class="mono">' + esc(v.sha256) + '</span></td></tr>';
+        }).join('') + '</table></div>' : '') +
+        '<p class="small muted">Fingerprint<br><span class="mono">' + esc(hash) + '</span></p></div>';
     } else {
       h = '<div class="card"><div class="err" style="font-size:16px"><b>&#10060; No match.</b> This file isn\'t an exact copy of any completed agreement in the records. ' +
         'It may have been changed, re-saved or printed to a new PDF, or it may be from somewhere else.</div>' +

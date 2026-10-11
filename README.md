@@ -20,6 +20,26 @@ Open http://localhost:8080/. To try it on your iPhone, keep the phone on the sam
 4. Back in the Outbox, Tūi's invite has appeared (signing is sequential). Repeat for each tenant, then the two landlord signers (Sam, then Pat), who sign last.
 5. Open the agreement in **Agreements** to see each signer's progress, the locked terms fingerprint and the full audit trail. Open the signed document and scroll to the **signing certificate**.
 6. **Verify** tab: choose the downloaded signed file to check it's an unaltered copy. Change one character in it and check again to see it fail.
+7. **Change tenants:** on the completed agreement, tap **Change tenants**. Tick Tūi as leaving, add Riley from the approved applicants, say how the bond is being settled, then send. Riley signs first and reads the whole agreement as an annex. Then Tūi (who gives a forwarding address), Mia, and the landlord signers sign. Afterwards the original shows as **Replaced** and the change as **Current**. The Verify page shows both versions.
+
+## Changing tenants after signing
+
+The signed agreement is never edited. Each change is a short **Change of Tenants** document that refers to the exact signed version it changes, by that version's SHA-256 fingerprint. Each version links to the one before it:
+
+```
+v1  Original agreement              fingerprint A
+ └─ v2  Change: Riley joins          refers to A    fingerprint B
+     └─ v3  Change: Tūi leaves       refers to B    fingerprint C   <- current
+```
+
+- **Covers:** filling a room (add only), replacing someone (swap), and someone leaving without a replacement (remove only). The tenancy continues, so the start date, fixed term, rent and the 12-month rent-increase clock are all unchanged.
+- **Who signs, in order:** joining tenants → leaving tenants → continuing tenants → the landlord's signer(s). Every person signs with the same link, email code, read-to-the-end step and audit trail as the original.
+- **Joining tenants** must come from an approved application, so their application reference is required. They read the **whole agreement as it will stand** (an annex) as well as the change, and agree to be bound by it.
+- **Leaving tenants** give a forwarding address for service. They are responsible for their obligations up to the effective date, and not after it.
+- **Bond:** the change records the total bond (still no more than 4 weeks' rent) and how it's being settled between the tenants. It also states that the landlord will notify Tenancy Services through Bond Hub within 10 working days.
+- **Only one change at a time:** a change can only be made to the current, fully signed version. While a change is out for signing, no other change can start. If it's declined, cancelled or expires, the previous version simply stays in force.
+- **What you get:** a signed Change of Tenants document (with the annex and its own signing certificate) emailed to everyone involved, including the leaving tenant. The previous version is marked **Replaced** in its own audit trail. **Current agreement** gives a combined reading copy, clearly labelled as not a signed document. The Verify page says whether a copy is current or replaced and lists every version. If an earlier signed version no longer matches the fingerprint recorded by the change after it, that is flagged.
+- *Legal points to check before relying on this:* assignment needs the landlord's written consent, which can't be unreasonably withheld. Also check how far a leaving tenant's liability goes, and the 10-working-day Bond Hub deadline.
 
 ## What a signer sees
 
@@ -92,7 +112,8 @@ Every action is a `POST` to the web app URL with a JSON body and `Content-Type: 
 | Cancel / void | `admin.cancel` with a reason. Tenants who were already sent a link are emailed. |
 | Resend | `admin.issueLink` with `channel: email`, `sms` (returns the text to open in Messages) or `copy` |
 | Signed PDF saved to Drive | `agreement.final` (Drive file and SHA-256). `admin.download` returns it. |
-| Tenancy created on full signature | On the `completed` webhook (or by polling), read `signers[].details` (confirmed name, mobile, address for service and ID) and `source.groupKey` to create the tenancy record. |
+| Tenancy created on full signature | On the `completed` webhook (or by polling), read `agreement.tenants` (confirmed name, mobile, address for service, ID and application `ref`) and `source.groupKey` to create the tenancy record. |
+| *(new)* Flatmate changes | `admin.createVariation` with `input: {parentId, effectiveDate, add[] (each with an application ref), remove[] (emails), bondTotal, bondArrangement, reason}`. `admin.previewVariation` shows the document without sending. When it completes, the `completed` webhook has `kind: "variation"`, `tenancyId`, `version`, `change` and the new `tenants`. Use it to update the tenancy's move-in and move-out dates and to start the Bond Hub change-of-tenant task (bond step 3 in the brief). `admin.current` returns the combined reading copy. |
 
 Field names follow your DocHub data keys (`LandlordName`, `RentPerWeek`, `TenancyStart`, `Tenant1Name`, …). See `ESign.buildFields` in `docs/js/core.js`.
 
@@ -104,7 +125,7 @@ docs/                    static site (GitHub Pages root)
   sign.html              signer page (the mobile experience)
   verify.html            public "is this copy genuine?" check
   js/core.js             shared rules: validation, hashing, audit chain, rendering, engine
-  js/agreement-template.js  the agreement wording (versioned, frozen into each agreement)
+  js/agreement-template.js  agreement and change-of-tenants wording (versioned, frozen into each document)
   js/demo-backend.js     in-browser backend for demo mode
   js/config.js           demo vs live switch
 apps-script/             live backend (Core.js and Template.js are generated: npm run build)
@@ -115,7 +136,7 @@ tools/                   build and local server
 The same `core.js` runs in three places: the browser demo, Apps Script and the Node tests. The rules can't drift apart between them. Source files are pure ASCII (non-ASCII is written as `\u` escapes), following the main project's rule, and a test enforces it.
 
 ```bash
-npm test        # 19 tests: engine, audit chain, tampering, validation, Apps Script adapter, ASCII
+npm test        # 27 tests: engine, audit chain, tampering, validation, landlord signers, changes of tenants, Apps Script adapter, ASCII
 npm run build   # after editing docs/js/core.js or agreement-template.js
 ```
 

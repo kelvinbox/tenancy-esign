@@ -160,6 +160,70 @@ var ESignTemplates = (function () {
     ]
   };
 
+  /*
+   * Change of tenants (a variation of a signed agreement). Each one refers to the exact signed
+   * document it changes by its SHA-256 fingerprint, so the versions form a chain. Joining tenants
+   * also read an annex: the full agreement as it stands after the change.
+   * Block types used only here: parentRef, changes, tenantsAfter.
+   */
+  T['nz-change-of-tenants-v1'] = {
+    id: 'nz-change-of-tenants-v1',
+    version: '1.0.0',
+    title: 'Change of Tenants',
+    subtitle: 'Variation of a residential tenancy agreement (Residential Tenancies Act 1986)',
+    intro: 'This document changes who the tenants are under the tenancy agreement identified below. Apart from the changes set out here, ' +
+      'every term of that agreement stays the same and continues to apply. The tenancy continues: this is not a new tenancy, ' +
+      'and the start date, any fixed term, the rent and the other terms are unchanged.',
+    sections: [
+      { id: 'agreement', heading: '1. The agreement being changed', blocks: [{ type: 'parentRef' }] },
+      { id: 'change', heading: '2. The change', blocks: [{ type: 'changes' }] },
+      {
+        id: 'tenants-after', heading: '3. The tenants from the effective date',
+        blocks: [
+          { type: 'p', text: 'From {{EffectiveDate}} the tenants under the agreement are:' },
+          { type: 'tenantsAfter' }
+        ]
+      },
+      {
+        id: 'bond', heading: '4. Bond',
+        blocks: [
+          {
+            type: 'kv', rows: [
+              ['Total bond after the change', '${{BondTotal}}'],
+              ['How the bond is being settled', '{{BondArrangement}}']
+            ]
+          },
+          {
+            type: 'list', items: [
+              'The bond is not more than 4 weeks\' rent.',
+              'The landlord will tell Tenancy Services about this change of tenant (through Bond Hub) within 10 working days of it taking effect. Each tenant may be asked to confirm the change.',
+              { text: 'Any payment between a leaving tenant and a joining tenant for a share of the bond is between them, as recorded above.', when: 'HasLeaving' }
+            ]
+          }
+        ]
+      },
+      {
+        id: 'agreements', heading: '5. What each party agrees',
+        blocks: [{
+          type: 'list', items: [
+            { text: 'Each joining tenant has read the tenancy agreement (set out in the annex) and agrees to be bound by all of its terms from the effective date, together with the other tenants.', when: 'HasJoining' },
+            { text: 'Each leaving tenant stops being a tenant on the effective date. They remain responsible for their obligations under the agreement up to that date, but not after it.', when: 'HasLeaving' },
+            { text: 'Each continuing tenant agrees to this change and continues to be bound by the agreement.', when: 'HasContinuing' },
+            'The landlord consents to this change. Where a tenant is leaving and another joining, this includes consent to the transfer of the leaving tenant\'s interest in the tenancy.',
+            'The rent, the tenancy dates and all other terms of the agreement are unchanged.'
+          ]
+        }]
+      },
+      {
+        id: 'electronic', heading: '6. Signing electronically',
+        blocks: [
+          { type: 'p', text: 'The parties agree that this change may be signed electronically, one party after another in the order shown below, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The change takes effect only when every party has signed. Until then the agreement continues unchanged.' }
+        ]
+      },
+      { id: 'signatures', heading: '7. Signatures', blocks: [{ type: 'signatures' }] }
+    ]
+  };
+
   return T;
 })();
 

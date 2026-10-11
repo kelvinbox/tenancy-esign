@@ -50,6 +50,11 @@ var DemoData = {
       ]
     }
   ],
+  // Approved applicants who can join an existing tenancy (filling a room or replacing someone).
+  applicants: [
+    { ref: 'KB-20050', name: 'Riley Sample', email: 'riley@example.com', mobile: '021 000 1050', idType: 'Driver licence', idNumber: 'DX000050', dob: '1999-07-07' },
+    { ref: 'KB-20051', name: 'Casey Demo', email: 'casey@example.net', mobile: '022 000 1051', idType: 'Passport', idNumber: 'LA000051', dob: '2001-11-20' }
+  ],
   rentPaymentDetails: 'Automatic payment to Owner Family Trust, account 00-0000-0000000-00 (fake), reference: your surname',
   healthyHomesStatement: 'The landlord complies with the healthy homes standards for heating, insulation, ventilation, moisture ingress and drainage, and draught stopping. ' +
     'Heating: 6kW heat pump in the living room. Ventilation: extractor fans in the kitchen and bathroom vent outside; every habitable room has an opening window. ' +

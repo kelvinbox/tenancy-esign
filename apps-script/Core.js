@@ -17,8 +17,9 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.1.0';
+  var VERSION = '0.2.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
+  var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
   var MAX_LANDLORD_SIGNERS = 2;
 
@@ -72,7 +73,10 @@ var ESign = (function () {
     return user.charAt(0) + '***@' + host.charAt(0) + '***' + rest;
   }
 
-  function roleLabel(role) { return String(role).replace(/^(Tenant|Landlord)(\d)$/, '$1 $2'); }
+  function roleLabel(role) {
+    return String(role).replace(/^(Tenant|Landlord)(\d)$/, '$1 $2').replace(/^NewTenant(\d)$/, 'New tenant $1')
+      .replace(/^LeavingTenant(\d)$/, 'Leaving tenant $1').replace(/^ContinuingTenant(\d)$/, 'Continuing tenant $1');
+  }
 
   /* =====================================================================
    * SHA-256 (pure JS, synchronous, so it behaves the same everywhere)
@@ -348,6 +352,90 @@ var ESign = (function () {
     return { errors: errors, warnings: warnings, value: v };
   }
 
+  /**
+   * Validation of a change of tenants against the current version of a tenancy.
+   * ctx: {terms, tenants (current), landlordSigners (from the current version)}
+   */
+  function validateVariation(input, ctx, today) {
+    input = input || {};
+    var errors = [], warnings = [];
+    var current = ctx.tenants, terms = ctx.terms;
+    var currentEmails = current.map(function (t) { return t.email; });
+    var v = {
+      effectiveDate: str(input.effectiveDate),
+      reason: str(input.reason).slice(0, 300),
+      bondArrangement: str(input.bondArrangement).slice(0, 1500),
+      add: [], remove: [], landlordSigners: []
+    };
+
+    var eff = v.effectiveDate;
+    if (!parseYmd(eff)) errors.push('Choose the date the change takes effect.');
+    else {
+      if (terms.startDate && eff < terms.startDate) errors.push('The change can\'t take effect before the tenancy starts (' + longDate(terms.startDate) + ').');
+      if (terms.endDate && eff > terms.endDate) errors.push('The change can\'t take effect after the fixed term ends (' + longDate(terms.endDate) + ').');
+      if (today && eff < today) warnings.push('The effective date is in the past. That\'s allowed, for example to record a change that has already happened.');
+    }
+
+    (Array.isArray(input.remove) ? input.remove : []).forEach(function (e) {
+      var email = normEmail(typeof e === 'string' ? e : e && e.email);
+      var t = current.filter(function (x) { return x.email === email; })[0];
+      if (!t) errors.push(email + ' isn\'t a tenant on the current version of this agreement.');
+      else if (!v.remove.some(function (r) { return r.email === email; })) v.remove.push({ email: email, name: t.name });
+    });
+
+    (Array.isArray(input.add) ? input.add : []).forEach(function (t, i) {
+      var n = i + 1;
+      var tv = {
+        name: str(t.name), email: normEmail(t.email), mobile: str(t.mobile), idType: str(t.idType),
+        idNumber: str(t.idNumber), dob: str(t.dob), ref: str(t.ref)
+      };
+      if (!tv.name) errors.push('New tenant ' + n + ' needs a name.');
+      if (!isEmail(tv.email)) errors.push('New tenant ' + n + ' (' + (tv.name || 'no name') + ') needs a valid email address.');
+      if (!tv.ref) errors.push('New tenant ' + n + ' (' + (tv.name || 'no name') + ') must come from an approved application: give the application reference.');
+      if (tv.dob && !parseYmd(tv.dob)) errors.push('New tenant ' + n + '\'s date of birth isn\'t a valid date.');
+      var age = tv.dob && today ? ageOn(tv.dob, today) : null;
+      tv.under18 = age === null ? '' : (age < 18 ? 'Yes' : 'No');
+      if (!tv.idType) tv.idType = tv.idNumber ? 'Driver licence' : '';
+      if (currentEmails.indexOf(tv.email) >= 0) errors.push(tv.name + ' (' + tv.email + ') is already a tenant.');
+      v.add.push(tv);
+    });
+
+    if (!v.add.length && !v.remove.length) errors.push('Choose who is leaving and/or add who is joining.');
+    var after = current.length - v.remove.length + v.add.length;
+    if (after < 1) errors.push('At least one tenant must remain. If everyone is leaving, that is the end of the tenancy, not a change of tenants.');
+    if (after > MAX_TENANTS) errors.push('An agreement can have at most ' + MAX_TENANTS + ' tenants (this change would make ' + after + ').');
+    if (Number(terms.maxOccupants) >= 1 && after > Number(terms.maxOccupants)) {
+      errors.push('This change would make ' + after + ' tenants, but the maximum number of occupants is ' + terms.maxOccupants + '.');
+    }
+
+    var rent = moneyNum(terms.rentPerWeek);
+    var bond = input.bondTotal === undefined || input.bondTotal === '' ? moneyNum(terms.bond) : moneyNum(input.bondTotal);
+    if (isNaN(bond) || bond < 0) errors.push('Enter the total bond after the change, for example 2600.');
+    else if (rent > 0 && bond > rent * 4 + 1e-9) errors.push('The bond can\'t be more than 4 weeks\' rent ($' + money(rent * 4) + ').');
+    v.bondTotal = bond >= 0 ? money(bond) : '';
+    if (!v.bondArrangement) errors.push('Say how the bond is being settled, for example "Riley pays Tui $650 for Tui\'s share; the total bond stays at $2600 with Tenancy Services."');
+
+    var ls = Array.isArray(input.landlordSigners) && input.landlordSigners.length ? input.landlordSigners : ctx.landlordSigners;
+    if (ls.length > MAX_LANDLORD_SIGNERS) errors.push('At most ' + MAX_LANDLORD_SIGNERS + ' people can sign for the landlord.');
+    v.landlordSigners = ls.slice(0, MAX_LANDLORD_SIGNERS).map(function (s, i) {
+      var sv = { name: str(s.name), email: normEmail(s.email), mobile: str(s.mobile) };
+      if (!sv.name || !isEmail(sv.email)) errors.push('Landlord signer ' + (i + 1) + ' needs a name and a valid email address.');
+      return sv;
+    });
+
+    var seen = {};
+    current.map(function (t) { return { name: t.name, email: t.email }; })
+      .concat(v.add.filter(function (t) { return t.email && currentEmails.indexOf(t.email) < 0; }))
+      .concat(v.landlordSigners.map(function (s) { return { name: s.name + ' (landlord)', email: s.email }; }))
+      .forEach(function (p) {
+        if (!p.email) return;
+        if (seen[p.email]) errors.push('Every signer needs their own email address: ' + p.email + ' is used by ' + seen[p.email] + ' and ' + p.name + '.');
+        else seen[p.email] = p.name;
+      });
+
+    return { errors: errors, warnings: warnings, value: v };
+  }
+
   /* =====================================================================
    * Signer details (what each person confirms or edits when they sign)
    * ===================================================================== */
@@ -366,16 +454,30 @@ var ESign = (function () {
     landlord: [
       { key: 'name', label: 'Your full name', required: true, hint: 'The person signing for the landlord.' },
       { key: 'capacity', label: 'Signing as', required: true, type: 'select', options: ['Landlord', 'Co-owner', 'Trustee', 'Agent for the landlord'] }
+    ],
+    outgoing: [
+      { key: 'name', label: 'Full legal name', required: true },
+      { key: 'email', label: 'Email', readonly: true, hint: 'Your signing link and code were sent here.' },
+      { key: 'mobile', label: 'Mobile', required: true, type: 'tel' },
+      { key: 'addressForService', label: 'Forwarding address for service', required: true, type: 'textarea',
+        hint: 'Where notices and anything about your bond can reach you after you leave.' }
+    ],
+    continuing: [
+      { key: 'name', label: 'Full legal name', required: true },
+      { key: 'email', label: 'Email', readonly: true, hint: 'Your signing link and code were sent here.' },
+      { key: 'mobile', label: 'Mobile', required: true, type: 'tel' }
     ]
   };
+  FIELD_DEFS.incoming = FIELD_DEFS.tenant;
 
   /** Landlord signers sign after the tenants. One signer keeps the plain "Landlord" role. */
-  function landlordSignerRecords(v) {
+  function landlordSignerRecords(v, before) {
     var two = v.landlordSigners.length > 1;
+    before = before === undefined ? v.tenants.length : before;
     return v.landlordSigners.map(function (ls, i) {
       return {
         id: two ? 'L' + (i + 1) : 'L', role: two ? 'Landlord' + (i + 1) : 'Landlord', kind: 'landlord',
-        order: v.tenants.length + i + 1, email: ls.email, status: 'Waiting',
+        order: before + i + 1, email: ls.email, status: 'Waiting',
         prefill: { name: ls.name, email: ls.email, mobile: ls.mobile, capacity: 'Landlord' }
       };
     });
@@ -446,6 +548,22 @@ var ESign = (function () {
       f[p + 'IdType'] = d.idType; f[p + 'IdNumber'] = d.idNumber; f[p + 'Under18'] = d.under18;
       f[p + 'AddressForService'] = d.addressForService;
     });
+    if (env.kind === 'variation') {
+      var c = env.change;
+      f.OriginalAgreementId = env.tenancyId;
+      f.ParentAgreementId = env.parent.id;
+      f.ParentVersion = String(env.parent.version);
+      f.ParentFingerprint = env.parent.finalSha256;
+      f.Version = String(env.version);
+      f.EffectiveDate = longDate(c.effectiveDate);
+      f.Reason = c.reason;
+      f.HasReason = !!c.reason;
+      f.HasJoining = c.add.length > 0;
+      f.HasLeaving = c.remove.length > 0;
+      f.HasContinuing = env.signers.some(function (s) { return s.kind === 'continuing'; });
+      f.BondTotal = c.bondTotal;
+      f.BondArrangement = c.bondArrangement;
+    }
     return f;
   }
 
@@ -481,8 +599,10 @@ var ESign = (function () {
   }
 
   function renderParty(s, env, mode) {
-    var d = signerDetails(s);
-    var pending = s.kind === 'tenant' && !s.details;
+    return renderPerson(roleLabel(s.role), signerDetails(s), mode, s.kind === 'tenant' && !s.details);
+  }
+
+  function renderPerson(label, d, mode, pending) {
     var rows = kvRow('Full name', val(d.name, mode)) +
       kvRow('Email', val(d.email, mode)) +
       kvRow('Mobile', val(d.mobile, mode)) +
@@ -490,7 +610,7 @@ var ESign = (function () {
         (mode === 'view' ? '<span class="fv pending">To be given by the tenant when they sign</span>' : '&mdash;')) +
       kvRow('ID', val((d.idType ? d.idType + ': ' : '') + (d.idNumber || ''), mode)) +
       kvRow('Under 18', val(d.under18, mode));
-    return '<div class="party"><div class="party-h">' + esc(roleLabel(s.role)) +
+    return '<div class="party"><div class="party-h">' + esc(label) +
       (pending && mode === 'view' ? ' <span class="muted">(details confirmed when they sign)</span>' : '') +
       '</div><table class="kv">' + rows + '</table></div>';
   }
@@ -540,8 +660,92 @@ var ESign = (function () {
         return env.signers.filter(function (s) { return s.kind === 'tenant'; })
           .map(function (s) { return renderParty(s, env, mode); }).join('');
       case 'signatures': return '<div class="sigs">' + renderSignatures(env, opts) + '</div>';
+      case 'parentRef':
+        return '<table class="kv">' +
+          kvRow('Tenancy agreement', fillText('{{OriginalAgreementId}}', f, mode)) +
+          kvRow('Premises', fillText('{{PropertyAddress}}', f, mode)) +
+          kvRow('Landlord', fillText('{{LandlordName}}', f, mode)) +
+          kvRow('Version being changed', fillText('Version {{ParentVersion}} ({{ParentAgreementId}})', f, mode)) +
+          kvRow('Fingerprint of that version (SHA-256)', '<span class="mono">' + fillText('{{ParentFingerprint}}', f, mode) + '</span>') +
+          kvRow('This variation', fillText('Version {{Version}}', f, mode)) + '</table>';
+      case 'changes':
+        return '<table class="kv">' +
+          env.signers.filter(function (s) { return s.kind === 'incoming'; }).map(function (s) {
+            return kvRow('Joining', val(signerDetails(s).name, mode) + ' from ' + fillText('{{EffectiveDate}}', f, mode));
+          }).join('') +
+          env.change.remove.map(function (r) {
+            return kvRow('Leaving', val(r.name, mode) + ' on ' + fillText('{{EffectiveDate}}', f, mode));
+          }).join('') +
+          kvRow('Effective date', fillText('{{EffectiveDate}}', f, mode)) +
+          (f.HasReason ? kvRow('Reason', fillText('{{Reason}}', f, mode)) : '') + '</table>';
+      case 'tenantsAfter':
+        return tenantsAfter(env).map(function (t, i) {
+          return renderPerson('Tenant ' + (i + 1), t, mode, !!t.pending);
+        }).join('');
+      case 'history':
+        return '<table class="kv">' + (opts.history || []).map(function (h) {
+          return kvRow('Version ' + h.version, esc(h.label) + '<br><span class="muted">' + esc(h.id) +
+            (h.completedAt ? ' &middot; completed ' + esc((opts.fmt || String)(h.completedAt)) : '') + '</span>' +
+            (h.sha256 ? '<br><span class="mono">SHA-256 ' + esc(h.sha256) + '</span>' : ''));
+        }).join('') + '</table>';
       default: return '';
     }
+  }
+
+  /** The tenants once a variation takes effect (provisional until the variation is signed). */
+  function tenantsAfter(env) {
+    if (env.tenantsAfter) return env.tenantsAfter;
+    var leaving = env.change.remove.map(function (r) { return r.email; });
+    var out = env.tenantsBefore.filter(function (t) { return leaving.indexOf(t.email) < 0; }).map(function (t) {
+      var o = clone(t), s = env.signers.filter(function (x) { return x.kind === 'continuing' && x.email === t.email; })[0];
+      if (s && s.details) { o.name = s.details.name; o.mobile = s.details.mobile; }
+      return o;
+    });
+    env.signers.filter(function (s) { return s.kind === 'incoming'; }).forEach(function (s) {
+      var d = signerDetails(s);
+      out.push({
+        name: d.name, email: s.email, mobile: d.mobile, idType: d.idType, idNumber: d.idNumber, under18: d.under18,
+        addressForService: d.addressForService || '', ref: s.ref || null, dob: s.dob || null, pending: !s.details
+      });
+    });
+    return out;
+  }
+
+  /** The tenants on a completed version of the tenancy. */
+  function currentTenants(env) {
+    if (env.kind === 'variation') return clone(tenantsAfter(env)).map(function (t) { delete t.pending; return t; });
+    return env.signers.filter(function (s) { return s.kind === 'tenant'; }).map(function (s) {
+      var d = signerDetails(s);
+      return {
+        name: d.name, email: s.email, mobile: d.mobile, idType: d.idType, idNumber: d.idNumber, under18: d.under18,
+        addressForService: d.addressForService || '', ref: s.ref || null, dob: s.dob || null
+      };
+    });
+  }
+
+  /**
+   * The original agreement's wording with today's tenants, and the list of signed versions in
+   * place of the signatures. A reading copy, not a signed document.
+   */
+  function consolidatedAgreement(original, tenants, history, opts) {
+    var e = clone(original);
+    e.signers = tenants.map(function (t, i) {
+      return {
+        id: 'T' + (i + 1), role: 'Tenant' + (i + 1), kind: 'tenant', email: t.email, status: 'Signed',
+        details: { name: t.name, email: t.email, mobile: t.mobile, idType: t.idType, idNumber: t.idNumber, under18: t.under18, addressForService: t.addressForService }
+      };
+    });
+    e.template.sections = e.template.sections.map(function (sec) {
+      return sec.id === 'signatures' ? { id: 'versions', heading: sec.heading.replace('Signatures', 'Signed versions'), blocks: [{ type: 'history' }] } : sec;
+    });
+    return renderAgreement(e, { mode: opts.mode || 'final', history: history, fmt: opts.fmt });
+  }
+
+  function renderConsolidatedHtml(original, tenants, history, opts) {
+    var a = consolidatedAgreement(original, tenants, history, opts || {});
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Current agreement (' + esc(original.id) + ')</title><style>' + PRINT_CSS +
+      '</style></head><body><div class="fp"><b>Reading copy, not a signed document.</b> This combines the signed agreement with every signed change since. ' +
+      'The signed documents listed in the last section are the legal record.</div>' + renderAgreementBody(original, a) + '</body></html>';
   }
 
   /** Returns {title, subtitle, intro, sections:[{id, heading, html}]} */
@@ -580,7 +784,10 @@ var ESign = (function () {
     EXPIRED: 'Signing links expired',
     ALL_PARTIES_SIGNED: 'All parties have signed',
     SIGNED_DOCUMENT_CREATED: 'Signed document created and fingerprinted',
-    COPIES_SENT: 'Signed copies emailed to every party'
+    COPIES_SENT: 'Signed copies emailed to every party',
+    VARIATION_STARTED: 'Change of tenants sent for signing; no other change can start until it ends',
+    VARIATION_ENDED: 'Change of tenants stopped without taking effect',
+    SUPERSEDED: 'Replaced by a signed change of tenants'
   };
 
   function describeEvent(ev) {
@@ -593,6 +800,7 @@ var ESign = (function () {
     if (d.reason) extra.push('reason: ' + d.reason);
     if (d.secondsOnPage) extra.push(d.secondsOnPage + 's on page');
     if (d.attemptsLeft !== undefined) extra.push(d.attemptsLeft + ' attempts left');
+    if (d.variationId) extra.push(d.variationId + (d.version ? ', version ' + d.version : '') + (d.outcome ? ', ' + d.outcome.toLowerCase() : ''));
     if (d.sha256) extra.push('SHA-256 ' + d.sha256);
     return t + (extra.length ? ' (' + extra.join('; ') + ')' : '');
   }
@@ -636,6 +844,8 @@ var ESign = (function () {
       kvRow('Status', esc(env.status) + (env.completedAt ? ' on ' + esc(fmt(env.completedAt)) : '')) +
       kvRow('Created', esc(fmt(env.createdAt)) + ' by ' + esc(env.createdBy || 'landlord')) +
       kvRow('Template', esc(env.template.title) + ' v' + esc(env.template.version) + ' (' + esc(env.template.id) + ')') +
+      (env.parent ? kvRow('Changes', 'Version ' + esc(env.parent.version) + ' (' + esc(env.parent.id) + '), whose signed document has SHA-256 <span class="mono">' +
+        esc(env.parent.finalSha256) + '</span>. This is version ' + esc(env.version) + ' of tenancy ' + esc(env.tenancyId) + '.') : '') +
       kvRow('Signing method', 'Personal link sent to each signer\'s email; email address verified with a one-time code before signing; ' +
         'agreement to sign electronically recorded; agreement read to the end; drawn signature plus typed full name; signers signed in order, tenants first and the landlord\'s signer(s) last.') +
       '</table>';
@@ -691,14 +901,15 @@ var ESign = (function () {
     var a = renderAgreement(env, { mode: 'final', images: opts.images, fmt: opts.fmt });
     return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(env.title) + ' (' + esc(env.id) + ')</title>' +
       '<style>' + PRINT_CSS + '</style></head><body>' + renderAgreementBody(env, a) +
+      (opts.annex ? '<div class="pb"></div>' + opts.annex : '') +
       '<div class="pb"></div>' + renderCertificate(env, events, opts) + '</body></html>';
   }
 
   /** Unsigned preview, for the landlord before sending. */
-  function renderPreviewHtml(env) {
+  function renderPreviewHtml(env, annex) {
     var a = renderAgreement(env, { mode: 'final' });
     return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview</title><style>' + PRINT_CSS +
-      '</style></head><body>' + renderAgreementBody(env, a) + '</body></html>';
+      '</style></head><body>' + renderAgreementBody(env, a) + (annex ? '<div class="pb"></div>' + annex : '') + '</body></html>';
   }
 
   /* =====================================================================
@@ -788,6 +999,78 @@ var ESign = (function () {
       } catch (e) { /* webhooks are best effort */ }
     }
 
+    /* ---------- tenancy versions (original agreement + signed changes of tenants) ---------- */
+
+    function docPhrase(env) { return env.kind === 'variation' ? 'a change of tenants to the tenancy agreement' : 'the tenancy agreement'; }
+    function docShort(env) { return env.kind === 'variation' ? 'change of tenants' : 'tenancy agreement'; }
+    function tenancyIdOf(env) { return env.tenancyId || env.id; }
+    function versionOf(env) { return env.version || 1; }
+
+    function tenancyEnvs(tid) {
+      return store.listEnvelopes().filter(function (e) { return tenancyIdOf(e) === tid; })
+        .sort(function (a, b) { return versionOf(a) - versionOf(b) || (a.createdAt < b.createdAt ? -1 : 1); });
+    }
+
+    function changeSummary(env) {
+      if (env.kind !== 'variation') return '';
+      var joining = env.signers.filter(function (s) { return s.kind === 'incoming'; }).map(function (s) { return signerDetails(s).name; });
+      var leaving = env.change.remove.map(function (r) { return r.name; });
+      var parts = [];
+      if (joining.length) parts.push(joining.join(' and ') + (joining.length > 1 ? ' are' : ' is') + ' joining');
+      if (leaving.length) parts.push(leaving.join(' and ') + (leaving.length > 1 ? ' are' : ' is') + ' leaving');
+      return parts.join(' and ') + ' on ' + longDate(env.change.effectiveDate) + '.';
+    }
+
+    function historyOf(tid, extra) {
+      var list = tenancyEnvs(tid).filter(function (e) { return e.status === 'Completed'; }).map(function (e) {
+        return {
+          version: versionOf(e), id: e.id, kind: e.kind || 'agreement',
+          label: e.kind === 'variation' ? 'Change of tenants: ' + changeSummary(e) : 'Original tenancy agreement',
+          completedAt: e.completedAt || null, sha256: e.final ? e.final.sha256 : null, current: !e.supersededBy
+        };
+      });
+      if (extra) list.push(extra);
+      return list;
+    }
+
+    /** Each change must point at the exact signed document it changed. */
+    function tenancyLinks(tid) {
+      var envs = tenancyEnvs(tid), byId = {}, problems = [];
+      envs.forEach(function (e) { byId[e.id] = e; });
+      envs.forEach(function (e) {
+        if (e.kind !== 'variation') return;
+        var p = byId[e.parent.id];
+        if (!p || !p.final || p.final.sha256 !== e.parent.finalSha256) problems.push(e.id);
+      });
+      return { ok: !problems.length, problems: problems };
+    }
+
+    function landlordSignersOf(env) {
+      return env.signers.filter(function (s) { return s.kind === 'landlord'; }).map(function (s) {
+        var d = signerDetails(s);
+        return { name: d.name, email: s.email, mobile: d.mobile || '' };
+      });
+    }
+
+    /** A change that ends without being signed frees the version it was changing. */
+    function releaseParent(env, outcome) {
+      if (env.kind !== 'variation') return;
+      var p = store.getEnvelope(env.parent.id);
+      if (p && p.pendingVariationId === env.id) {
+        p.pendingVariationId = null;
+        audit(p, 'VARIATION_ENDED', 'system', { variationId: env.id, version: env.version, outcome: outcome });
+        store.saveEnvelope(p);
+      }
+    }
+
+    function annexHtml(env, extra) {
+      var orig = store.getEnvelope(env.tenancyId);
+      if (!orig) return '';
+      var a = consolidatedAgreement(orig, tenantsAfter(env), historyOf(env.tenancyId, extra), { mode: 'final', fmt: fmt });
+      return '<div class="fp"><b>Annex: the tenancy agreement as it stands after this change (for reference).</b> ' +
+        'It is the signed agreement with the tenants updated. Each joining tenant agrees to be bound by it.</div>' + renderAgreementBody(orig, a);
+    }
+
     /* ---------- email ---------- */
 
     function button(link, label) {
@@ -812,11 +1095,11 @@ var ESign = (function () {
     function inviteEmail(env, s, link) {
       var first = signerDetails(s).name.split(' ')[0];
       var exp = fmt(env.expiresAt);
-      var subject = 'Please sign: tenancy agreement for ' + env.propertyAddress;
-      var text = 'Hi ' + first + ',\n\n' + ownerName + ' has sent you the tenancy agreement for ' + env.propertyAddress +
+      var subject = 'Please sign: ' + docShort(env) + ' for ' + env.propertyAddress;
+      var text = 'Hi ' + first + ',\n\n' + ownerName + ' has sent you ' + docPhrase(env) + ' for ' + env.propertyAddress +
         ' to read and sign. It takes about 5 minutes and works on your phone.\n\nOpen your personal signing link:\n' + link +
         '\n\nThe link is just for you, so please don\'t forward it. It expires on ' + exp + '.\n\nThanks,\n' + ownerName;
-      var html = wrapHtml('<p>Hi ' + esc(first) + ',</p><p>' + esc(ownerName) + ' has sent you the tenancy agreement for <b>' +
+      var html = wrapHtml('<p>Hi ' + esc(first) + ',</p><p>' + esc(ownerName) + ' has sent you ' + docPhrase(env) + ' for <b>' +
         esc(env.propertyAddress) + '</b> to read and sign. It takes about 5 minutes and works on your phone.</p>' +
         button(link, 'Review and sign') +
         '<p style="color:#555;font-size:14px">This link is just for you, so please don\'t forward it. It expires on ' + esc(exp) + '.</p>' +
@@ -853,6 +1136,7 @@ var ESign = (function () {
         env.status = 'Expired';
         audit(env, 'EXPIRED', 'system', {});
         store.saveEnvelope(env);
+        releaseParent(env, 'Expired');
         notify(env, 'expired');
       }
       return env;
@@ -909,6 +1193,15 @@ var ESign = (function () {
         completedAt: env.completedAt || null, updatedAt: env.updatedAt,
         progress: signed + '/' + env.signers.length,
         source: env.source || null,
+        kind: env.kind || 'agreement',
+        version: versionOf(env),
+        tenancyId: tenancyIdOf(env),
+        parentId: env.parent ? env.parent.id : null,
+        supersededBy: env.supersededBy || null,
+        pendingVariationId: env.pendingVariationId || null,
+        changeSummary: changeSummary(env) || null,
+        change: env.change ? clone(env.change) : null,
+        tenants: env.status === 'Completed' ? currentTenants(env) : null,
         final: env.final ? { sha256: env.final.sha256, name: env.final.name, url: env.final.url || null } : null,
         signers: env.signers.map(signerSummary)
       };
@@ -917,13 +1210,27 @@ var ESign = (function () {
     function signerView(env, s) {
       var cur = currentSigner(env);
       var verified = !!s.verifiedAt && minutesSince(s.verifiedAt) < VERIFY_MINUTES;
+      var doc = renderAgreement(env, { mode: 'view', fmt: fmt });
+      if (env.kind === 'variation' && s.kind === 'incoming') {
+        // A joining tenant must read the whole agreement they are joining, not just the change.
+        var orig = store.getEnvelope(env.tenancyId);
+        if (orig) {
+          var annex = consolidatedAgreement(orig, tenantsAfter(env), historyOf(env.tenancyId), { mode: 'view', fmt: fmt });
+          doc.sections = doc.sections.concat([{
+            id: 'annex', heading: 'Annex: the tenancy agreement you are joining',
+            html: '<p>This is the agreement as it will stand once this change takes effect. By signing, you agree to be bound by all of it.</p>'
+          }]).concat(annex.sections.map(function (sec) { return { id: 'annex-' + sec.id, heading: 'Annex ' + sec.heading, html: sec.html }; }));
+        }
+      }
       return {
         app: cfg.appName || 'Tenancy e-sign',
         ownerName: ownerName,
         agreement: {
           id: env.id, title: env.title, status: env.status, propertyAddress: env.propertyAddress,
           expiresAt: env.expiresAt, completedAt: env.completedAt || null, finalAvailable: !!env.final,
-          finalSha256: env.final ? env.final.sha256 : null
+          finalSha256: env.final ? env.final.sha256 : null,
+          kind: env.kind || 'agreement', version: versionOf(env), docLabel: docPhrase(env), docShort: docShort(env),
+          changeSummary: changeSummary(env) || null
         },
         me: {
           id: s.id, role: s.role, roleLabel: roleLabel(s.role), kind: s.kind, status: s.status,
@@ -939,7 +1246,7 @@ var ESign = (function () {
           return { roleLabel: roleLabel(x.role), name: signerDetails(x).name, status: x.status, signedAt: x.signedAt || null, isMe: x.id === s.id };
         }),
         termsHash: env.termsHash,
-        document: renderAgreement(env, { mode: 'view', fmt: fmt }),
+        document: doc,
         fields: FIELD_DEFS[s.kind],
         consentText: CONSENT_TEXT,
         agreeText: AGREE_TEXT
@@ -965,15 +1272,39 @@ var ESign = (function () {
           return o;
         }),
         events: events.map(function (ev) { var c = clone(ev); c.text = describeEvent(ev); return c; }),
-        chain: verifyChain(env.id, events)
+        chain: verifyChain(env.id, events),
+        tenancy: tenancyInfo(env)
+      };
+    }
+
+    function tenancyInfo(env) {
+      var tid = tenancyIdOf(env);
+      var pending = env.pendingVariationId ? store.getEnvelope(env.pendingVariationId) : null;
+      var versions = tenancyEnvs(tid).map(function (e) {
+        return {
+          id: e.id, version: versionOf(e), kind: e.kind || 'agreement', status: e.status, completedAt: e.completedAt || null,
+          label: e.kind === 'variation' ? 'Change of tenants: ' + changeSummary(e) : 'Original tenancy agreement',
+          current: e.status === 'Completed' && !e.supersededBy
+        };
+      });
+      return {
+        id: tid,
+        versions: versions,
+        links: tenancyLinks(tid),
+        isCurrent: env.status === 'Completed' && !env.supersededBy,
+        canChange: env.status === 'Completed' && !env.supersededBy && !(pending && pending.status === 'Sent'),
+        pending: pending && pending.status === 'Sent' ? { id: pending.id, version: versionOf(pending), progress: summary(pending).progress } : null,
+        tenantsNow: env.status === 'Completed' ? currentTenants(env) : null,
+        landlordSigners: landlordSignersOf(env)
       };
     }
 
     function termsHashOf(env) {
       return hashOf({
-        templateId: env.template.id, templateVersion: env.template.version, templateHash: env.templateHash,
+        kind: env.kind, templateId: env.template.id, templateVersion: env.template.version, templateHash: env.templateHash,
         propertyAddress: env.propertyAddress, landlord: env.landlord, terms: env.terms,
-        tenantsPrefill: env.signers.map(function (s) { return { role: s.role, email: s.email }; })
+        tenantsPrefill: env.signers.map(function (s) { return { role: s.role, email: s.email }; }),
+        parent: env.parent, tenantsBefore: env.tenantsBefore, change: env.change
       });
     }
 
@@ -992,6 +1323,9 @@ var ESign = (function () {
       var env = {
         id: id,
         schema: 1,
+        kind: 'agreement',
+        version: 1,
+        tenancyId: id,
         status: 'Sent',
         title: 'Tenancy agreement: ' + v.propertyAddress,
         propertyAddress: v.propertyAddress,
@@ -1029,6 +1363,125 @@ var ESign = (function () {
       return { agreement: summary(env), warnings: r.warnings, firstLink: inv.emailed ? null : inv.link };
     }
 
+    /* ---------- change of tenants (variation) ---------- */
+
+    function variationContext(parentId) {
+      var parent = loadEnv(parentId);
+      if (parent.status !== 'Completed') fail('Only a fully signed agreement can be changed.', 'INVALID');
+      if (parent.supersededBy) {
+        fail('This version has already been replaced by version ' + parent.supersededBy.version + ' (' + parent.supersededBy.id + '). Change the current version instead.', 'NOT_CURRENT');
+      }
+      if (parent.pendingVariationId) {
+        var pend = store.getEnvelope(parent.pendingVariationId);
+        if (pend) expireIfNeeded(pend);
+        if (pend && pend.status === 'Sent') {
+          fail('A change of tenants (' + pend.id + ') is already out for signing. Wait for it to finish, or cancel it first.', 'LOCKED');
+        }
+        parent = store.getEnvelope(parent.id);
+      }
+      return { parent: parent, ctx: { terms: parent.terms, tenants: currentTenants(parent), landlordSigners: landlordSignersOf(parent) } };
+    }
+
+    function buildVariation(input, actor) {
+      input = input || {};
+      var vc = variationContext(input.parentId), parent = vc.parent;
+      var r = validateVariation(input, vc.ctx, svc.today());
+      var tpl = (svc.templates || {})[VARIATION_TEMPLATE];
+      if (!tpl) fail('Unknown template: ' + VARIATION_TEMPLATE, 'INVALID');
+      var v = r.value, t = iso(), version = versionOf(parent) + 1;
+      var env = {
+        id: 'VAR-' + svc.today().replace(/-/g, '') + '-' + svc.randomString(5).toUpperCase(),
+        schema: 1,
+        kind: 'variation',
+        version: version,
+        tenancyId: tenancyIdOf(parent),
+        status: 'Sent',
+        title: 'Change of tenants (version ' + version + '): ' + parent.propertyAddress,
+        propertyAddress: parent.propertyAddress,
+        createdAt: t,
+        createdBy: actor || 'landlord',
+        sentAt: t,
+        expiresAt: new Date(now().getTime() + LINK_DAYS * 86400000).toISOString(),
+        template: clone(tpl),
+        templateHash: hashOf(tpl),
+        landlord: clone(parent.landlord),
+        terms: clone(parent.terms),
+        source: parent.source ? clone(parent.source) : null,
+        parent: { id: parent.id, version: versionOf(parent), finalSha256: parent.final.sha256, termsHash: parent.termsHash },
+        tenantsBefore: vc.ctx.tenants,
+        change: {
+          effectiveDate: v.effectiveDate, reason: v.reason,
+          add: v.add.map(function (a) { return { name: a.name, email: a.email, ref: a.ref }; }),
+          remove: v.remove, bondTotal: v.bondTotal, bondArrangement: v.bondArrangement
+        },
+        signers: [],
+        auditCount: 0,
+        auditHead: null
+      };
+      // Signing order: joining tenants, leaving tenants, continuing tenants, then the landlord's signer(s).
+      var n = 0;
+      v.add.forEach(function (a, i) {
+        env.signers.push({
+          id: 'N' + (i + 1), role: 'NewTenant' + (i + 1), kind: 'incoming', order: ++n, email: a.email, ref: a.ref, dob: a.dob || null,
+          prefill: { name: a.name, email: a.email, mobile: a.mobile, idType: a.idType, idNumber: a.idNumber, under18: a.under18, addressForService: '' },
+          status: 'Waiting'
+        });
+      });
+      v.remove.forEach(function (rm, i) {
+        var t0 = vc.ctx.tenants.filter(function (x) { return x.email === rm.email; })[0];
+        env.signers.push({
+          id: 'X' + (i + 1), role: 'LeavingTenant' + (i + 1), kind: 'outgoing', order: ++n, email: rm.email, ref: t0.ref || null,
+          prefill: { name: t0.name, email: t0.email, mobile: t0.mobile, addressForService: '' }, status: 'Waiting'
+        });
+      });
+      vc.ctx.tenants.filter(function (t0) { return !v.remove.some(function (rm) { return rm.email === t0.email; }); }).forEach(function (t0, i) {
+        env.signers.push({
+          id: 'C' + (i + 1), role: 'ContinuingTenant' + (i + 1), kind: 'continuing', order: ++n, email: t0.email, ref: t0.ref || null,
+          prefill: { name: t0.name, email: t0.email, mobile: t0.mobile }, status: 'Waiting'
+        });
+      });
+      env.signers = env.signers.concat(landlordSignerRecords({ landlordSigners: v.landlordSigners }, n));
+      env.termsHash = termsHashOf(env);
+      return { env: env, parent: parent, errors: r.errors, warnings: r.warnings };
+    }
+
+    function createVariation(input, actor) {
+      var b = buildVariation(input, actor);
+      if (b.errors.length) fail(b.errors.join('\n'), 'INVALID');
+      var env = b.env, parent = b.parent;
+      audit(env, 'AGREEMENT_CREATED', actor || 'landlord', {
+        termsHash: env.termsHash, templateId: env.template.id, templateVersion: env.template.version, templateHash: env.templateHash,
+        varies: { id: parent.id, version: versionOf(parent), documentSha256: parent.final.sha256 },
+        change: env.change,
+        signingOrder: env.signers.map(function (s) { return roleLabel(s.role) + ': ' + signerDetails(s).name + ' <' + s.email + '>'; }),
+        expiresAt: env.expiresAt, warnings: b.warnings
+      });
+      parent.pendingVariationId = env.id;
+      audit(parent, 'VARIATION_STARTED', actor || 'landlord', { variationId: env.id, version: env.version });
+      store.saveEnvelope(parent);
+      var inv = sendInvite(env, env.signers[0], 'first signer', 'system');
+      store.saveEnvelope(env);
+      notify(env, 'sent');
+      return { agreement: summary(env), warnings: b.warnings, firstLink: inv.emailed ? null : inv.link };
+    }
+
+    function previewVariation(input) {
+      var b = buildVariation(input);
+      b.env.id = 'PREVIEW';
+      return { errors: b.errors, warnings: b.warnings, html: renderPreviewHtml(b.env, annexHtml(b.env)) };
+    }
+
+    function currentAgreement(id) {
+      var env = loadEnv(id), tid = tenancyIdOf(env);
+      var done = tenancyEnvs(tid).filter(function (e) { return e.status === 'Completed' && !e.supersededBy; });
+      var cur = done[done.length - 1];
+      if (!cur) fail('There is no fully signed version of this agreement yet.');
+      return {
+        name: tid + ' current agreement (v' + versionOf(cur) + ').html', version: versionOf(cur),
+        html: renderConsolidatedHtml(store.getEnvelope(tid), currentTenants(cur), historyOf(tid), { fmt: fmt })
+      };
+    }
+
     function issueLink(id, signerId, channel, actor) {
       var env = loadEnv(id);
       if (env.status !== 'Sent') fail('This agreement is ' + env.status.toLowerCase() + ', so no new links can be sent.');
@@ -1049,7 +1502,7 @@ var ESign = (function () {
         var first = signerDetails(s).name.split(' ')[0];
         out = {
           link: link,
-          smsBody: 'Hi ' + first + ', here is your link to sign the tenancy agreement for ' + env.propertyAddress + ': ' + link + ' - ' + ownerName
+          smsBody: 'Hi ' + first + ', here is your link to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + ': ' + link + ' - ' + ownerName
         };
       }
       store.saveEnvelope(env);
@@ -1064,18 +1517,19 @@ var ESign = (function () {
       env.cancelledAt = iso();
       audit(env, 'CANCELLED', actor || 'landlord', { reason: reason });
       env.signers.forEach(function (s) {
-        if (s.sentAt && s.status !== 'Signed' && s.kind === 'tenant') {
+        if (s.sentAt && s.status !== 'Signed' && s.kind !== 'landlord') {
           mail(env, {
             to: s.email, kind: 'cancelled',
-            subject: 'Cancelled: tenancy agreement for ' + env.propertyAddress,
-            text: 'Hi ' + signerDetails(s).name.split(' ')[0] + ',\n\nThe tenancy agreement for ' + env.propertyAddress +
+            subject: 'Cancelled: ' + docShort(env) + ' for ' + env.propertyAddress,
+            text: 'Hi ' + signerDetails(s).name.split(' ')[0] + ',\n\nThe ' + docShort(env) + ' for ' + env.propertyAddress +
               ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' + ownerName,
-            html: wrapHtml('<p>Hi ' + esc(signerDetails(s).name.split(' ')[0]) + ',</p><p>The tenancy agreement for <b>' + esc(env.propertyAddress) +
+            html: wrapHtml('<p>Hi ' + esc(signerDetails(s).name.split(' ')[0]) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(env.propertyAddress) +
               '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p><p>' + esc(ownerName) + '</p>')
           });
         }
       });
       store.saveEnvelope(env);
+      releaseParent(env, 'Cancelled');
       notify(env, 'cancelled');
       return summary(env);
     }
@@ -1116,9 +1570,9 @@ var ESign = (function () {
       var ok = mail(env, {
         to: s.email, kind: 'code', code: code,
         subject: code + ' is your signing code',
-        text: 'Your code to sign the tenancy agreement for ' + env.propertyAddress + ' is:\n\n' + code +
+        text: 'Your code to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + ' is:\n\n' + code +
           '\n\nIt expires in ' + OTP_MINUTES + ' minutes. If you didn\'t ask for this code, you can ignore this email.',
-        html: wrapHtml('<p>Your code to sign the tenancy agreement for <b>' + esc(env.propertyAddress) + '</b> is:</p>' +
+        html: wrapHtml('<p>Your code to sign ' + docPhrase(env) + ' for <b>' + esc(env.propertyAddress) + '</b> is:</p>' +
           '<p style="font-size:30px;letter-spacing:6px;font-weight:bold;margin:16px 0">' + code + '</p>' +
           '<p style="color:#555;font-size:14px">It expires in ' + OTP_MINUTES + ' minutes. If you didn\'t ask for this code, you can ignore this email.</p>')
       });
@@ -1233,9 +1687,9 @@ var ESign = (function () {
           mail(env, {
             to: cfg.ownerEmail, kind: 'notice',
             subject: details.name + ' signed (' + done + '/' + env.signers.length + '): ' + env.propertyAddress,
-            text: details.name + ' signed the tenancy agreement for ' + env.propertyAddress + '. Next to sign: ' +
+            text: details.name + ' signed ' + docPhrase(env) + ' for ' + env.propertyAddress + '. Next to sign: ' +
               signerDetails(next).name + ' (' + roleLabel(next.role) + ').',
-            html: wrapHtml('<p><b>' + esc(details.name) + '</b> signed the tenancy agreement for ' + esc(env.propertyAddress) +
+            html: wrapHtml('<p><b>' + esc(details.name) + '</b> signed ' + docPhrase(env) + ' for ' + esc(env.propertyAddress) +
               '.</p><p>Next to sign: ' + esc(signerDetails(next).name) + ' (' + esc(roleLabel(next.role)) + ').</p>')
           });
         }
@@ -1254,10 +1708,17 @@ var ESign = (function () {
         termsHash: env.termsHash,
         signatures: env.signers.map(function (s) { return { signer: s.role, recordHash: s.signature.recordHash }; })
       });
+      var annex = null;
+      if (env.kind === 'variation') {
+        env.tenantsAfter = tenantsAfter(env).map(function (t) { var c = clone(t); delete c.pending; return c; });
+        annex = annexHtml(env, {
+          version: env.version, id: env.id, label: 'This change of tenants: ' + changeSummary(env), completedAt: env.completedAt, sha256: null
+        });
+      }
       var images = {};
       env.signers.forEach(function (s) { images[s.id] = svc.loadImage(s.signature.imageRef); });
       var events = store.listAudit(env.id);
-      var html = renderFinalHtml(env, events, { images: images, fmt: fmt, verifyUrl: cfg.verifyUrl });
+      var html = renderFinalHtml(env, events, { images: images, fmt: fmt, verifyUrl: cfg.verifyUrl, annex: annex });
       var fin = svc.storeFinal(env, html);
       env.final = { ref: fin.ref, url: fin.url || null, sha256: fin.sha256, name: fin.name, mime: fin.mime, auditHeadAtRender: env.auditHead };
       audit(env, 'SIGNED_DOCUMENT_CREATED', 'system', { file: fin.name, sha256: fin.sha256, auditHeadAtRender: env.auditHead });
@@ -1268,12 +1729,12 @@ var ESign = (function () {
       to.forEach(function (addr) {
         var ok = mail(env, {
           to: addr, kind: 'completed', attachFinal: true, finalRef: fin.ref,
-          subject: 'Signed: tenancy agreement for ' + env.propertyAddress,
-          text: 'Everyone has signed the tenancy agreement for ' + env.propertyAddress + '. Your copy is attached (' + fin.name + ').\n\n' +
+          subject: 'Signed: ' + docShort(env) + ' for ' + env.propertyAddress,
+          text: 'Everyone has signed ' + docPhrase(env) + ' for ' + env.propertyAddress + '. Your copy is attached (' + fin.name + ').\n\n' +
             'Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:\n' +
             'Document SHA-256: ' + fin.sha256 + '\nAudit trail SHA-256: ' + env.final.auditHeadAtRender + '\n' +
             (cfg.verifyUrl ? '\nCheck a copy at any time: ' + cfg.verifyUrl + '\n' : '') + '\n' + ownerName,
-          html: wrapHtml('<p>Everyone has signed the tenancy agreement for <b>' + esc(env.propertyAddress) + '</b>. Your copy is attached (' + esc(fin.name) + ').</p>' +
+          html: wrapHtml('<p>Everyone has signed ' + docPhrase(env) + ' for <b>' + esc(env.propertyAddress) + '</b>. Your copy is attached (' + esc(fin.name) + ').</p>' +
             '<p style="font-size:14px;color:#444">Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:<br>' +
             'Document SHA-256: <code style="word-break:break-all">' + esc(fin.sha256) + '</code><br>' +
             'Audit trail SHA-256: <code style="word-break:break-all">' + esc(env.final.auditHeadAtRender) + '</code></p>' +
@@ -1284,6 +1745,15 @@ var ESign = (function () {
       });
       audit(env, 'COPIES_SENT', 'system', { to: sent, sha256: fin.sha256 });
       store.saveEnvelope(env);
+      if (env.kind === 'variation') {
+        var p = store.getEnvelope(env.parent.id);
+        if (p) {
+          p.supersededBy = { id: env.id, version: env.version, at: env.completedAt, sha256: fin.sha256 };
+          p.pendingVariationId = null;
+          audit(p, 'SUPERSEDED', 'system', { variationId: env.id, version: env.version, sha256: fin.sha256 });
+          store.saveEnvelope(p);
+        }
+      }
       notify(env, 'completed');
     }
 
@@ -1301,12 +1771,13 @@ var ESign = (function () {
         mail(env, {
           to: cfg.ownerEmail, kind: 'notice',
           subject: 'Declined by ' + signerDetails(s).name + ': ' + env.propertyAddress,
-          text: signerDetails(s).name + ' declined to sign the tenancy agreement for ' + env.propertyAddress + '.\n\nReason: ' + s.declineReason,
-          html: wrapHtml('<p><b>' + esc(signerDetails(s).name) + '</b> declined to sign the tenancy agreement for ' + esc(env.propertyAddress) +
+          text: signerDetails(s).name + ' declined to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + '.\n\nReason: ' + s.declineReason,
+          html: wrapHtml('<p><b>' + esc(signerDetails(s).name) + '</b> declined to sign ' + docPhrase(env) + ' for ' + esc(env.propertyAddress) +
             '.</p><p>Reason: ' + esc(s.declineReason) + '</p>')
         });
       }
       store.saveEnvelope(env);
+      releaseParent(env, 'Declined');
       notify(env, 'declined');
       return signerView(env, s);
     }
@@ -1331,7 +1802,14 @@ var ESign = (function () {
             chainOk: chain.ok, events: chain.count,
             signers: env.signers.map(function (s) {
               return { roleLabel: roleLabel(s.role), name: signerDetails(s).name, signedAt: s.signedAt, signedAtText: fmt(s.signedAt) };
-            })
+            }),
+            kind: env.kind || 'agreement',
+            version: versionOf(env),
+            tenancyId: tenancyIdOf(env),
+            changeSummary: changeSummary(env) || null,
+            supersededBy: env.supersededBy ? { id: env.supersededBy.id, version: env.supersededBy.version, atText: fmt(env.supersededBy.at) } : null,
+            linksOk: tenancyLinks(tenancyIdOf(env)).ok,
+            history: historyOf(tenancyIdOf(env)).map(function (h) { h.completedAtText = fmt(h.completedAt); return h; })
           };
         }
       }
@@ -1373,7 +1851,10 @@ var ESign = (function () {
       submit: submit,
       decline: decline,
       signerDownload: signerDownload,
-      verify: verify
+      verify: verify,
+      createVariation: createVariation,
+      previewVariation: previewVariation,
+      currentAgreement: currentAgreement
     };
   }
 
@@ -1408,6 +1889,9 @@ var ESign = (function () {
       case 'admin.issueLink': return engine.issueLink(req.id, req.signerId, req.channel, actor);
       case 'admin.cancel': return engine.cancel(req.id, req.reason, actor);
       case 'admin.download': return engine.adminDownload(req.id);
+      case 'admin.previewVariation': return engine.previewVariation(req.input);
+      case 'admin.createVariation': return engine.createVariation(req.input, actor);
+      case 'admin.current': return engine.currentAgreement(req.id);
       default: var e3 = new Error('Unknown action: ' + action); e3.code = 'BAD_REQUEST'; throw e3;
     }
   }
@@ -1415,6 +1899,7 @@ var ESign = (function () {
   return {
     VERSION: VERSION,
     DEFAULT_TEMPLATE: DEFAULT_TEMPLATE,
+    VARIATION_TEMPLATE: VARIATION_TEMPLATE,
     FIELD_DEFS: FIELD_DEFS,
     sha256: sha256,
     stable: stable,
@@ -1431,6 +1916,7 @@ var ESign = (function () {
     money: money,
     moneyNum: moneyNum,
     validateCreate: validateCreate,
+    validateVariation: validateVariation,
     validateDetails: validateDetails,
     buildFields: buildFields,
     renderAgreement: renderAgreement,
