@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.0';
+  var VERSION = '0.3.1';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
