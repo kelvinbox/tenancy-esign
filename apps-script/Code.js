@@ -80,7 +80,7 @@ function setup() {
   if (!p.ADMIN_KEY) p.ADMIN_KEY = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
   if (!p.OWNER_EMAIL) p.OWNER_EMAIL = Session.getEffectiveUser().getEmail();
   if (!p.OWNER_NAME) p.OWNER_NAME = 'The landlord';
-  if (!p.SIGN_URL) p.SIGN_URL = 'https://YOUR-GITHUB-USERNAME.github.io/tenancy-esign/sign.html';
+  if (!p.SIGN_URL) p.SIGN_URL = 'https://kelvinbox.github.io/tenancy-esign/sign.html';
   if (!p.VERIFY_URL) p.VERIFY_URL = p.SIGN_URL.replace(/sign\.html.*$/, 'verify.html');
   sp.setProperties(p);
   Logger.log('Setup done.\n' +
