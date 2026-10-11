@@ -24,7 +24,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.0.0',
+    version: '1.1.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -83,6 +83,7 @@ var ESignTemplates = (function () {
         blocks: [
           { type: 'h', text: 'Insurance' },
           { type: 'p', when: 'IsInsured', text: 'The premises are insured with {{Insurer}} (policy {{InsurancePolicy}}). The excess is ${{ExcessAmount}}. The tenant can ask the landlord for a copy of the insurance policy.' },
+          { type: 'p', when: 'IsInsured', text: 'There is insurance covering this rental property that is relevant to tenant\u2019s liability for damage to premises, including damage to body corporate facilities.' },
           { type: 'p', unless: 'IsInsured', text: 'The premises are not insured.' },
           { type: 'p', text: 'If the tenant, or someone they allow on the premises, carelessly damages the premises, the tenant may be liable for the cost of the damage up to 4 weeks\' rent, or up to the insurance excess if that is lower. Different rules apply to intentional damage and damage caused by a criminal act.' },
           { type: 'h', text: 'Insulation' },

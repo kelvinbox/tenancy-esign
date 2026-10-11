@@ -281,3 +281,13 @@ test('messages and the signing page name the agreement\'s own landlord, not OWNE
   const sms = b.call({ action: 'admin.issueLink', id: res.agreement.id, signerId: view.me.id, channel: 'sms' });
   assert.match(sms.smsBody, / - Les and Jennifer Box$/);
 });
+test('insurance statement about tenant liability appears only when the property is insured', () => {
+  const b = memoryBackend();
+  const statement = 'There is insurance covering this rental property that is relevant to tenant&#39;s liability';
+  const insured = b.call({ action: 'admin.preview', input: sampleInput() });
+  assert.ok(insured.html.indexOf('There is insurance covering this rental property') >= 0, 'shown when insured');
+  assert.ok(insured.html.indexOf('including damage to body corporate facilities') >= 0);
+  const none = b.call({ action: 'admin.preview', input: sampleInput({ terms: Object.assign({}, sampleInput().terms, { insurer: 'Not insured', insurancePolicy: '', excess: '' }) }) });
+  assert.ok(none.html.indexOf('There is insurance covering this rental property') < 0, 'hidden when not insured');
+  assert.ok(statement);
+});
