@@ -123,6 +123,40 @@ test('swap a tenant: leaving tenant gives a forwarding address; the result repla
   assert.equal(v3.agreement.version, 3);
 });
 
+test('a later change gives a new joiner the full trail: original and every earlier variation', () => {
+  const { b, id } = signedOriginal();
+  // v2: Riley joins.
+  const v2 = b.call({ action: 'admin.createVariation', input: { parentId: id, effectiveDate: '2026-12-01', add: [riley], bondArrangement: 'Top-up.' } }).agreement.id;
+  ['riley@example.com', 'mia@example.com', 'tui@example.net', 'landlord@example.com'].forEach(e => signAs(b, lastInvite(b, e)));
+  // v3: Tui leaves and Casey joins.
+  const casey = { name: 'Casey Demo', email: 'casey@example.net', mobile: '022 000 1051', idType: 'Passport', idNumber: 'LA000051', dob: '2001-11-20', ref: 'KB-20051' };
+  const v3 = b.call({ action: 'admin.createVariation', input: { parentId: v2, effectiveDate: '2027-03-01', remove: ['tui@example.net'], add: [casey], bondArrangement: 'Casey pays Tui.' } }).agreement.id;
+
+  // Casey reads the original and the earlier variation, both as signed.
+  const cv = b.call({ action: 'sign.open', token: lastInvite(b, 'casey@example.net') });
+  const ids = cv.document.sections.map(s => s.id);
+  assert.ok(ids.includes('ref-1-rent') && ids.includes('ref-2-change'), 'original and v2 both shown');
+  // The v3 variation itself lists v1 and v2 as the documents it amends.
+  const docs = cv.document.sections.find(s => s.id === 'documents').html;
+  assert.ok(docs.includes(id) && docs.includes(v2));
+
+  ['casey@example.net', 'tui@example.net', 'mia@example.com', 'riley@example.com', 'landlord@example.com'].forEach(e => signAs(b, lastInvite(b, e)));
+  assert.equal(b.call({ action: 'admin.get', id: v3 }).agreement.status, 'Completed');
+
+  // Casey's email carries v3, plus the signed original and v2. Existing tenants just get v3.
+  const caseyCopy = b.db.outbox.find(m => m.kind === 'completed' && m.to === 'casey@example.net');
+  assert.deepEqual(caseyCopy.attachments.map(a => a.ref), ['fin-' + v3, 'fin-' + id, 'fin-' + v2]);
+  const rileyCopy = b.db.outbox.filter(m => m.kind === 'completed' && m.to === 'riley@example.com').pop();
+  assert.deepEqual(rileyCopy.attachments.map(a => a.ref), ['fin-' + v3]);
+
+  // The summary and Verify list all three versions.
+  assert.ok(['fin-' + id, v2, v3].every(x => b.call({ action: 'admin.summary', id }).html.includes(x.replace('fin-', ''))));
+  const ver = b.call({ action: 'verify', sha256: b.call({ action: 'admin.get', id: v2 }).agreement.final.sha256 });
+  assert.equal(ver.history.length, 3);
+  assert.equal(ver.supersededBy.id, v3);
+  assert.equal(b.call({ action: 'admin.get', id: v3 }).tenancy.links.ok, true);
+});
+
 test('a declined or cancelled change frees the agreement for another', () => {
   const { b, id } = signedOriginal();
   const r1 = b.call({ action: 'admin.createVariation', input: { parentId: id, effectiveDate: '2026-12-01', add: [riley], bondArrangement: 'Top-up.' } });

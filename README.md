@@ -136,7 +136,7 @@ tools/                   build and local server
 The same `core.js` runs in three places: the browser demo, Apps Script and the Node tests. The rules can't drift apart between them. Source files are pure ASCII (non-ASCII is written as `\u` escapes), following the main project's rule, and a test enforces it.
 
 ```bash
-npm test        # 29 tests: engine, audit chain, tampering, validation, landlord signers, changes of tenants, Apps Script adapter, ASCII
+npm test        # 30 tests: engine, audit chain, tampering, validation, landlord signers, changes of tenants, Apps Script adapter, ASCII
 npm run build   # after editing docs/js/core.js or agreement-template.js
 ```
 
