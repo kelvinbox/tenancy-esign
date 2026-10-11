@@ -75,7 +75,17 @@ function esignCall_(action, params, actor) {
       err.code = out.code || 'ESIGN';
       throw err;
     }
+    // A cold start can answer with the service's GET page ({ok, app, version}) instead of the action's
+    // reply. Read-only actions are retried; anything that changes data never is, so it can't happen twice.
+    if (!Object.prototype.hasOwnProperty.call(out, 'data')) {
+      lastErr = new Error('the signing service was still starting up');
+      if (ESIGN_SAFE_TO_RETRY[action]) { if (i < attempts) Utilities.sleep(1000 * i); continue; }
+      throw new Error('The signing service was still starting up and didn\'t confirm. Wait a minute and tap Check status before trying again, so nothing is sent twice.');
+    }
     return out.data;
+  }
+  if (!ESIGN_SAFE_TO_RETRY[action]) {
+    throw new Error('The signing service didn\'t answer in time (' + (lastErr && lastErr.message ? lastErr.message : 'no reply') + '). It may still have gone through: wait a minute and tap Check status before trying again.');
   }
   throw new Error('Couldn\'t reach the signing service: ' + (lastErr && lastErr.message ? lastErr.message : 'no reply') + '. Try again in a minute.');
 }

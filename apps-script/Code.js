@@ -25,6 +25,22 @@ var AUDIT_HEADERS = ['Agreement', 'Seq', 'At (UTC)', 'Event', 'By', 'Hash', 'Eve
 
 /* ---------- web app entry points ---------- */
 
+/*
+ * Keep-warm: a cold start can take close to a minute, longer than Tenant Management waits. Run installKeepWarm()
+ * once from the editor; every 10 minutes keepWarm() pings this web app so the request path stays loaded.
+ */
+function keepWarm() {
+  try {
+    UrlFetchApp.fetch(ScriptApp.getService().getUrl(), { method: 'post', contentType: 'text/plain', payload: '{"action":"ping"}',
+      muteHttpExceptions: true, followRedirects: true });
+  } catch (e) { console.warn('keepWarm: ' + (e && e.message)); }
+}
+function installKeepWarm() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'keepWarm') ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(10).create();
+  return 'The signing service will be kept warm every 10 minutes.';
+}
+
 function doGet() {
   return json_({ ok: true, app: 'tenancy-esign', version: ESign.VERSION });
 }

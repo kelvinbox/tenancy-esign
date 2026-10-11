@@ -31,6 +31,7 @@ function tenantManagement(opts) {
         const req = JSON.parse(o.payload);
         calls.push(req.action);
         if (opts.down) throw new Error('DNS error');
+        if (opts.hello && opts.hello.n > 0) { opts.hello.n--; return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ ok: true, app: 'tenancy-esign', version: 'x' }) }; }
         let body;
         try { body = { ok: true, data: b.call(req) }; } catch (e) { body = { ok: false, error: e.message, code: e.code }; }
         return { getResponseCode: () => 200, getContentText: () => JSON.stringify(body) };
@@ -146,7 +147,7 @@ test('only read-only calls are retried; the poller skips DocHub and survives fai
   const down = tenantManagement({ down: true });
   assert.throws(() => down.ctx.esignRefreshAgreement_({ requestId: 'X' }), /Couldn't reach the signing service/);
   assert.equal(down.calls.filter(a => a === 'admin.get').length, 3);
-  assert.throws(() => down.ctx.esignSendAgreement_(ctxFor()), /Couldn't reach/);
+  assert.throws(() => down.ctx.esignSendAgreement_(ctxFor()), /didn't answer in time .*may still have gone through/);
   assert.equal(down.calls.filter(a => a === 'admin.create').length, 1, 'never resend a create');
 
   const tm = tenantManagement();
@@ -162,4 +163,23 @@ test('only read-only calls are retried; the poller skips DocHub and survives fai
   const unset = tenantManagement();
   delete unset.props.ESIGN_ADMIN_KEY;
   assert.throws(() => unset.ctx.esignRefreshAgreement_({ requestId: 'X' }), /isn't set up yet/);
+});
+
+test('a cold-start reply without data: status checks retry, sends never repeat', () => {
+  const tm = tenantManagement();
+  const sent = tm.run('esignSendAgreement_', { groupKey: 'KB-20031', property, landlord, applicants, details: { rentPerWeek: 650, bond: 2600, startDate: '2026-11-01', endDate: '2027-10-31', maxOccupants: 3 } }, 'Kelvin');
+  // status check: first reply is the GET page, the retry gets the real answer
+  const hello = { n: 1 }; const tm2 = tenantManagement({ hello });
+  tm2.b.db.envelopes = tm.b.db.envelopes; tm2.b.db.audit = tm.b.db.audit;
+  const r = tm2.run('esignRefreshAgreement_', sent.agreement);
+  assert.equal(r.agreement.requestId, sent.agreement.requestId); assert.equal(hello.n, 0); assert.deepEqual(tm2.calls, ['admin.get', 'admin.get']);
+  // a send that gets the GET page is never retried, and says what to do
+  const tm3 = tenantManagement({ hello: { n: 1 } });
+  assert.throws(() => tm3.ctx.esignSendAgreement_({ groupKey: 'KB-20031', property, landlord, applicants, details: { rentPerWeek: 650, bond: 2600, startDate: '2026-11-01', endDate: '2027-10-31', maxOccupants: 3 } }, 'Kelvin'),
+    /still starting up and didn't confirm. Wait a minute and tap Check status/);
+  assert.deepEqual(tm3.calls, ['admin.create']);
+  // a send that times out says it may still have gone through
+  const tm4 = tenantManagement({ down: true });
+  assert.throws(() => tm4.ctx.esignSendAgreement_({ groupKey: 'KB-20031', property, landlord, applicants, details: { rentPerWeek: 650, bond: 2600, startDate: '2026-11-01', endDate: '2027-10-31', maxOccupants: 3 } }, 'Kelvin'),
+    /didn't answer in time .*It may still have gone through/);
 });
