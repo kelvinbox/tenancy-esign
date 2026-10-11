@@ -1,0 +1,1423 @@
+/*
+ * Tenancy e-sign core.
+ *
+ * One file shared by three runtimes:
+ *   - the browser (demo mode, with an in-browser fake backend)
+ *   - Google Apps Script (the live backend; copied to apps-script/Core.js by tools/build.js)
+ *   - Node (tests)
+ *
+ * It holds every rule that matters for traceability: validation, the locked terms
+ * fingerprint, signing order, one-time codes, the hash-chained audit trail and the
+ * rendering of the agreement and its signing certificate. Storage, email, files and
+ * clocks are supplied by an adapter (see createEngine).
+ *
+ * Pure ASCII: non-ASCII characters are written as \u escapes.
+ */
+var ESign = (function () {
+  'use strict';
+
+  var VERSION = '0.1.0';
+  var DEFAULT_TEMPLATE = 'nz-residential-v1';
+  var MAX_TENANTS = 5;
+
+  var CONSENT_TEXT = 'I agree to receive this tenancy agreement and related notices electronically, ' +
+    'and to sign it with an electronic signature. I understand that my electronic signature is ' +
+    'legally binding, in the same way as a handwritten signature (Contract and Commercial Law Act 2017, Part 4). ' +
+    'I can ask the landlord for a paper copy at any time.';
+  var AGREE_TEXT = 'I have read this tenancy agreement, the details in it are correct, and I agree to be bound by it.';
+
+  /* =====================================================================
+   * Small helpers
+   * ===================================================================== */
+
+  function str(v) { return v === null || v === undefined ? '' : String(v).trim(); }
+  function clone(o) { return o === undefined ? undefined : JSON.parse(JSON.stringify(o)); }
+
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function stripMarks(s) {
+    s = String(s);
+    return typeof s.normalize === 'function' ? s.normalize('NFD').replace(/[\u0300-\u036f]/g, '') : s;
+  }
+
+  /** Name comparison ignores case, spacing, punctuation and macrons. */
+  function normName(s) {
+    return stripMarks(str(s)).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+
+  function normEmail(s) { return str(s).toLowerCase(); }
+  function isEmail(s) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str(s)); }
+
+  function safeEqual(a, b) {
+    a = String(a); b = String(b);
+    if (a.length !== b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return diff === 0;
+  }
+
+  function maskEmail(e) {
+    e = str(e);
+    var at = e.indexOf('@');
+    if (at < 1) return e;
+    var user = e.slice(0, at), dom = e.slice(at + 1);
+    var dot = dom.indexOf('.');
+    var host = dot > 0 ? dom.slice(0, dot) : dom, rest = dot > 0 ? dom.slice(dot) : '';
+    return user.charAt(0) + '***@' + host.charAt(0) + '***' + rest;
+  }
+
+  function roleLabel(role) { return String(role).replace(/^Tenant(\d)$/, 'Tenant $1'); }
+
+  /* =====================================================================
+   * SHA-256 (pure JS, synchronous, so it behaves the same everywhere)
+   * ===================================================================== */
+
+  function utf8Bytes(s) {
+    var out = [];
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+        var d = s.charCodeAt(i + 1);
+        if (d >= 0xdc00 && d <= 0xdfff) { c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00); i++; }
+      }
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+      else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+      else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+    return out;
+  }
+
+  var K256 = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+  ];
+
+  /** SHA-256 of a string (hashed as UTF-8) or an array of bytes. Returns lower-case hex. */
+  function sha256(input) {
+    var bytes = typeof input === 'string' ? utf8Bytes(input) : input;
+    var len = bytes.length;
+    var total = ((len + 9 + 63) >> 6) << 6;
+    var m = new Uint8Array(total);
+    for (var i = 0; i < len; i++) m[i] = bytes[i] & 255;
+    m[len] = 0x80;
+    var bitsHi = Math.floor(len / 0x20000000), bitsLo = (len * 8) >>> 0;
+    m[total - 8] = (bitsHi >>> 24) & 255; m[total - 7] = (bitsHi >>> 16) & 255;
+    m[total - 6] = (bitsHi >>> 8) & 255; m[total - 5] = bitsHi & 255;
+    m[total - 4] = (bitsLo >>> 24) & 255; m[total - 3] = (bitsLo >>> 16) & 255;
+    m[total - 2] = (bitsLo >>> 8) & 255; m[total - 1] = bitsLo & 255;
+
+    var H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    var W = new Array(64);
+    function ror(x, n) { return (x >>> n) | (x << (32 - n)); }
+    for (var off = 0; off < total; off += 64) {
+      for (var t = 0; t < 16; t++) {
+        var p = off + t * 4;
+        W[t] = (m[p] << 24) | (m[p + 1] << 16) | (m[p + 2] << 8) | m[p + 3];
+      }
+      for (t = 16; t < 64; t++) {
+        var x = W[t - 15], y = W[t - 2];
+        var s0 = ror(x, 7) ^ ror(x, 18) ^ (x >>> 3);
+        var s1 = ror(y, 17) ^ ror(y, 19) ^ (y >>> 10);
+        W[t] = (W[t - 16] + s0 + W[t - 7] + s1) | 0;
+      }
+      var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (t = 0; t < 64; t++) {
+        var S1 = ror(e, 6) ^ ror(e, 11) ^ ror(e, 25);
+        var ch = (e & f) ^ (~e & g);
+        var t1 = (h + S1 + ch + K256[t] + W[t]) | 0;
+        var S0 = ror(a, 2) ^ ror(a, 13) ^ ror(a, 22);
+        var maj = (a & b) ^ (a & c) ^ (b & c);
+        var t2 = (S0 + maj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    var hex = '';
+    for (i = 0; i < 8; i++) hex += ('00000000' + (H[i] >>> 0).toString(16)).slice(-8);
+    return hex;
+  }
+
+  /** JSON with object keys sorted, so the same data always hashes the same. */
+  function stable(v) {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'number') return isFinite(v) ? JSON.stringify(v) : 'null';
+    if (typeof v !== 'object') return JSON.stringify(v);
+    if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+    var keys = Object.keys(v).filter(function (k) { return v[k] !== undefined; }).sort();
+    return '{' + keys.map(function (k) { return JSON.stringify(k) + ':' + stable(v[k]); }).join(',') + '}';
+  }
+
+  function hashOf(obj) { return sha256(stable(obj)); }
+
+  /* =====================================================================
+   * Dates and money (NZ conventions from the brief)
+   * ===================================================================== */
+
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+    'September', 'October', 'November', 'December'];
+
+  function parseYmd(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(str(s));
+    if (!m) return null;
+    var y = +m[1], mo = +m[2], d = +m[3];
+    var dt = new Date(Date.UTC(y, mo - 1, d));
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+    return { y: y, m: mo, d: d };
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function addDays(s, n) {
+    var p = parseYmd(s);
+    if (!p) return '';
+    var dt = new Date(Date.UTC(p.y, p.m - 1, p.d + n));
+    return dt.getUTCFullYear() + '-' + pad2(dt.getUTCMonth() + 1) + '-' + pad2(dt.getUTCDate());
+  }
+
+  function ordinal(n) {
+    var s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+
+  /** "2027-01-01" -> "1st January 2027" */
+  function longDate(s) {
+    var p = parseYmd(s);
+    return p ? ordinal(p.d) + ' ' + MONTHS[p.m - 1] + ' ' + p.y : '';
+  }
+
+  function ageOn(dob, today) {
+    var a = parseYmd(dob), b = parseYmd(today);
+    if (!a || !b) return null;
+    var age = b.y - a.y;
+    if (b.m < a.m || (b.m === a.m && b.d < a.d)) age--;
+    return age;
+  }
+
+  function moneyNum(v) {
+    if (typeof v === 'number') return v;
+    var s = str(v).replace(/[$,\s]/g, '');
+    if (!/^\d+(\.\d{1,2})?$/.test(s)) return NaN;
+    return Number(s);
+  }
+
+  /** 848 -> "848", 848.5 -> "848.50" */
+  function money(n) {
+    var c = Math.round(Number(n) * 100);
+    return c % 100 === 0 ? String(c / 100) : (c / 100).toFixed(2);
+  }
+
+  /* =====================================================================
+   * Validation of a new agreement
+   * ===================================================================== */
+
+  function validateCreate(input, today) {
+    input = input || {};
+    var errors = [], warnings = [];
+    var L = input.landlord || {}, T = input.terms || {};
+
+    var v = {
+      templateId: str(input.templateId) || DEFAULT_TEMPLATE,
+      propertyAddress: str(input.propertyAddress),
+      landlord: {
+        name: str(L.name),
+        signerName: str(L.signerName) || str(L.name),
+        email: normEmail(L.email),
+        phone: str(L.phone),
+        mobile: str(L.mobile),
+        addressForService: str(L.addressForService)
+      },
+      terms: {},
+      tenants: [],
+      source: input.source ? clone(input.source) : null
+    };
+
+    if (!v.propertyAddress) errors.push('Enter the rental address.');
+    if (!v.landlord.name) errors.push('Enter the landlord\'s name.');
+    if (!isEmail(v.landlord.email)) errors.push('Enter a valid email address for the landlord (they sign last).');
+    if (!v.landlord.phone && !v.landlord.mobile) errors.push('Enter a phone or mobile number for the landlord.');
+    if (!v.landlord.addressForService) errors.push('Enter the landlord\'s address for service.');
+
+    var rent = moneyNum(T.rentPerWeek);
+    if (!(rent > 0)) errors.push('Enter the rent per week, for example 650 or 650.50.');
+    var bond = moneyNum(T.bond);
+    if (isNaN(bond) || bond < 0) errors.push('Enter the bond, for example 2600 (or 0 for no bond).');
+    else if (rent > 0 && bond > rent * 4 + 1e-9) {
+      errors.push('The bond can\'t be more than 4 weeks\' rent ($' + money(rent * 4) + ').');
+    }
+
+    var start = str(T.startDate), end = str(T.endDate);
+    if (!parseYmd(start)) errors.push('Choose a start date.');
+    if (end && !parseYmd(end)) errors.push('The end date isn\'t a valid date. Leave it blank for a periodic tenancy.');
+    if (parseYmd(start) && parseYmd(end) && end <= start) errors.push('The end date must be after the start date.');
+
+    var occ = Number(str(T.maxOccupants));
+    if (!(occ >= 1) || Math.floor(occ) !== occ) errors.push('Maximum occupants must be a whole number of 1 or more.');
+
+    var insurer = str(T.insurer);
+    var insured = !!insurer && insurer.toLowerCase() !== 'not insured';
+    var excess = moneyNum(T.excess);
+    if (insured) {
+      if (!str(T.insurancePolicy)) errors.push('Enter the insurance policy (or set the insurer to "Not insured").');
+      if (isNaN(excess) || excess < 0) errors.push('Enter the insurance excess in dollars.');
+    }
+
+    var insulationDate = str(T.insulationDate);
+    if (insulationDate && !parseYmd(insulationDate)) errors.push('The insulation inspection date isn\'t a valid date.');
+    if (insulationDate && today && insulationDate > today) errors.push('The insulation inspection date can\'t be in the future.');
+    if (!str(T.insulationStatement)) errors.push('Enter the insulation statement (where the insulation is, its type and condition).');
+    if (!str(T.healthyHomesStatement)) errors.push('Enter the healthy homes statement.');
+    if (!str(T.rentPaymentDetails)) errors.push('Say how the rent is to be paid (for example the bank account to pay into).');
+
+    v.terms = {
+      rentPerWeek: rent > 0 ? money(rent) : '',
+      bond: bond >= 0 ? money(bond) : '',
+      startDate: start,
+      endDate: end,
+      maxOccupants: occ >= 1 ? occ : '',
+      rentPaymentDetails: str(T.rentPaymentDetails),
+      chattels: str(T.chattels) || 'None',
+      insurer: insured ? insurer : 'Not insured',
+      insurancePolicy: insured ? str(T.insurancePolicy) : '',
+      excess: insured && excess >= 0 ? money(excess) : '',
+      insulationDate: insulationDate,
+      insulationStatement: str(T.insulationStatement),
+      healthyHomesStatement: str(T.healthyHomesStatement),
+      pets: str(T.pets) || 'No pets are allowed without the landlord\'s written consent.',
+      additionalTerms: str(T.additionalTerms)
+    };
+
+    var tenants = Array.isArray(input.tenants) ? input.tenants : [];
+    if (tenants.length < 1) errors.push('Add at least one tenant.');
+    if (tenants.length > MAX_TENANTS) errors.push('An agreement can have at most ' + MAX_TENANTS + ' tenants.');
+    tenants.slice(0, MAX_TENANTS).forEach(function (t, i) {
+      var n = i + 1;
+      var tv = {
+        name: str(t.name), email: normEmail(t.email), mobile: str(t.mobile),
+        idType: str(t.idType), idNumber: str(t.idNumber), dob: str(t.dob),
+        ref: str(t.ref)
+      };
+      if (!tv.name) errors.push('Tenant ' + n + ' needs a name.');
+      if (!isEmail(tv.email)) errors.push('Tenant ' + n + ' (' + (tv.name || 'no name') + ') needs a valid email address.');
+      if (tv.dob && !parseYmd(tv.dob)) errors.push('Tenant ' + n + '\'s date of birth isn\'t a valid date.');
+      var age = tv.dob && today ? ageOn(tv.dob, today) : null;
+      tv.under18 = age === null ? '' : (age < 18 ? 'Yes' : 'No');
+      if (!tv.idType) tv.idType = tv.idNumber ? 'Driver licence' : '';
+      v.tenants.push(tv);
+    });
+
+    var seen = {};
+    v.tenants.concat([{ name: 'the landlord', email: v.landlord.email }]).forEach(function (p) {
+      if (!p.email) return;
+      if (seen[p.email]) errors.push('Every signer needs their own email address: ' + p.email + ' is used by ' + seen[p.email] + ' and ' + p.name + '.');
+      else seen[p.email] = p.name;
+    });
+
+    if (occ >= 1 && v.tenants.length > occ) {
+      warnings.push('There are ' + v.tenants.length + ' tenants but the maximum occupants is ' + occ + '.');
+    }
+
+    return { errors: errors, warnings: warnings, value: v };
+  }
+
+  /* =====================================================================
+   * Signer details (what each person confirms or edits when they sign)
+   * ===================================================================== */
+
+  var FIELD_DEFS = {
+    tenant: [
+      { key: 'name', label: 'Full legal name', required: true, hint: 'As it appears on your ID.' },
+      { key: 'email', label: 'Email', readonly: true, hint: 'Your signing link and code were sent here. Ask the landlord if this is wrong.' },
+      { key: 'mobile', label: 'Mobile', required: true, type: 'tel' },
+      { key: 'addressForService', label: 'Address for service', required: true, type: 'textarea', quick: 'property',
+        hint: 'Where legal notices can be delivered to you. Usually the rental address once you have moved in.' },
+      { key: 'idType', label: 'ID type', required: true, type: 'select', options: ['Driver licence', 'Passport', 'Other photo ID'] },
+      { key: 'idNumber', label: 'ID number', required: true },
+      { key: 'under18', label: 'Are you under 18?', required: true, type: 'radio', options: ['No', 'Yes'] }
+    ],
+    landlord: [
+      { key: 'name', label: 'Your full name', required: true, hint: 'The person signing for the landlord.' },
+      { key: 'capacity', label: 'Signing as', required: true, type: 'select', options: ['Landlord', 'Agent for the landlord'] }
+    ]
+  };
+
+  function validateDetails(kind, input, prefill) {
+    input = input || {};
+    var defs = FIELD_DEFS[kind], out = {}, errors = [];
+    defs.forEach(function (d) {
+      var val = d.readonly ? str(prefill[d.key]) : str(input[d.key]);
+      if (val.length > 400) val = val.slice(0, 400);
+      if (d.required && !val) errors.push(d.label + ' is required.');
+      if (d.options && val && d.options.indexOf(val) < 0) errors.push(d.label + ': choose one of the options.');
+      out[d.key] = val;
+    });
+    if (out.mobile && out.mobile.replace(/\D/g, '').length < 8) errors.push('Mobile: enter the full number.');
+    return { errors: errors, value: out };
+  }
+
+  /* =====================================================================
+   * Fields used by the agreement template (DocHub-style data keys)
+   * ===================================================================== */
+
+  function signerDetails(s) { return s.details || s.prefill || {}; }
+
+  function buildFields(env) {
+    var t = env.terms, L = env.landlord;
+    var fixed = !!t.endDate;
+    var f = {
+      AgreementId: env.id,
+      PropertyAddress: env.propertyAddress,
+      TenancyAddress: env.propertyAddress,
+      LandlordName: L.name,
+      LandlordSignerName: L.signerName,
+      LandlordAddress: L.addressForService,
+      LandlordEmail: L.email,
+      LandlordPhone: L.phone || '-',
+      LandlordMobile: L.mobile || '-',
+      RentPerWeek: t.rentPerWeek,
+      BondAmount: t.bond,
+      RentPaymentDetails: t.rentPaymentDetails,
+      TenancyStart: longDate(t.startDate),
+      TenancyEnd: fixed ? longDate(t.endDate) : '',
+      TenancyTypeText: fixed ? 'Fixed term' : 'Periodic',
+      IsFixedTerm: fixed,
+      IsPeriodic: !fixed,
+      MaximumOccupants: String(t.maxOccupants),
+      Chattels: t.chattels,
+      IsInsured: t.insurer !== 'Not insured',
+      Insurer: t.insurer,
+      InsurancePolicy: t.insurancePolicy,
+      ExcessAmount: t.excess,
+      InsulationStatement: t.insulationStatement,
+      HasInsulationDate: !!t.insulationDate,
+      InsulationInspectionDate: longDate(t.insulationDate),
+      HealthyHomesStatement: t.healthyHomesStatement,
+      PetsText: t.pets,
+      AdditionalTerms: t.additionalTerms,
+      HasAdditionalTerms: !!t.additionalTerms
+    };
+    var sp = parseYmd(t.startDate), ep = parseYmd(t.endDate);
+    if (sp) { f.TenancyStartDay = ordinal(sp.d); f.TenancyStartMonth = MONTHS[sp.m - 1]; f.TenancyStartYear = String(sp.y); }
+    if (ep) { f.TenancyEndDay = ordinal(ep.d); f.TenancyEndMonth = MONTHS[ep.m - 1]; f.TenancyEndYear = String(ep.y); }
+    env.signers.forEach(function (s) {
+      if (s.kind !== 'tenant') return;
+      var d = signerDetails(s), p = s.role;
+      f[p + 'Name'] = d.name; f[p + 'Email'] = d.email; f[p + 'Phone'] = d.mobile;
+      f[p + 'IdType'] = d.idType; f[p + 'IdNumber'] = d.idNumber; f[p + 'Under18'] = d.under18;
+      f[p + 'AddressForService'] = d.addressForService;
+    });
+    return f;
+  }
+
+  /* =====================================================================
+   * Rendering (HTML). Used for the signing screen, the PDF and the certificate.
+   * ===================================================================== */
+
+  function cond(b, f) {
+    if (!b || typeof b !== 'object') return true;
+    if (b.when && !f[b.when]) return false;
+    if (b.unless && f[b.unless]) return false;
+    return true;
+  }
+
+  function fillText(text, f, mode) {
+    var h = esc(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+    return h.replace(/\{\{(\w+)\}\}/g, function (_, k) {
+      var v = f[k];
+      v = v === undefined || v === null || v === false || v === true ? '' : String(v);
+      var e = esc(v).replace(/\n/g, '<br>');
+      return mode === 'view' ? '<span class="fv">' + (e || '&mdash;') + '</span>' : e;
+    });
+  }
+
+  function kvRow(label, valueHtml) {
+    return '<tr><th>' + esc(label) + '</th><td>' + valueHtml + '</td></tr>';
+  }
+
+  function val(v, mode) {
+    var e = esc(v).replace(/\n/g, '<br>');
+    if (mode === 'view') return '<span class="fv">' + (e || '&mdash;') + '</span>';
+    return e || '&mdash;';
+  }
+
+  function renderParty(s, env, mode) {
+    var d = signerDetails(s);
+    var pending = s.kind === 'tenant' && !s.details;
+    var rows = kvRow('Full name', val(d.name, mode)) +
+      kvRow('Email', val(d.email, mode)) +
+      kvRow('Mobile', val(d.mobile, mode)) +
+      kvRow('Address for service', d.addressForService ? val(d.addressForService, mode) :
+        (mode === 'view' ? '<span class="fv pending">To be given by the tenant when they sign</span>' : '&mdash;')) +
+      kvRow('ID', val((d.idType ? d.idType + ': ' : '') + (d.idNumber || ''), mode)) +
+      kvRow('Under 18', val(d.under18, mode));
+    return '<div class="party"><div class="party-h">' + esc(roleLabel(s.role)) +
+      (pending && mode === 'view' ? ' <span class="muted">(details confirmed when they sign)</span>' : '') +
+      '</div><table class="kv">' + rows + '</table></div>';
+  }
+
+  function renderSignatures(env, opts) {
+    var mode = opts.mode, images = opts.images || {}, fmt = opts.fmt || function (x) { return x; };
+    return env.signers.map(function (s) {
+      var d = signerDetails(s);
+      var box;
+      if (s.status === 'Signed' && s.signature) {
+        box = images[s.id] ? '<img alt="Signature of ' + esc(d.name) + '" src="' + esc(images[s.id]) + '">' :
+          '<span class="sig-done">&#10003; Signed electronically</span>';
+      } else {
+        box = '<span class="muted">Not signed yet</span>';
+      }
+      var meta = s.signedAt ? 'Signed electronically on ' + esc(fmt(s.signedAt)) : '&nbsp;';
+      var capacity = s.kind === 'landlord' ? (d.capacity || 'Landlord') + ' &ndash; for ' + esc(env.landlord.name) : esc(roleLabel(s.role));
+      return '<div class="sig"><div class="sig-role">' + capacity + '</div>' +
+        '<div class="sig-name">' + esc(d.name) + '</div>' +
+        '<div class="sig-box">' + box + '</div>' +
+        '<div class="sig-meta">' + meta + (mode === 'final' && s.signature ? '<br>Typed name: ' + esc(s.signature.typedName) : '') +
+        '</div></div>';
+    }).join('');
+  }
+
+  function renderBlock(b, env, f, opts) {
+    var mode = opts.mode;
+    switch (b.type) {
+      case 'p': return '<p>' + fillText(b.text, f, mode) + '</p>';
+      case 'h': return '<h4>' + esc(b.text) + '</h4>';
+      case 'kv':
+        return '<table class="kv">' + b.rows.filter(function (r) { return cond(r[2], f); }).map(function (r) {
+          return kvRow(r[0], fillText(r[1], f, mode));
+        }).join('') + '</table>';
+      case 'list':
+        return '<ol class="terms">' + b.items.filter(function (it) { return cond(it, f); }).map(function (it) {
+          return '<li>' + fillText(typeof it === 'string' ? it : it.text, f, mode) + '</li>';
+        }).join('') + '</ol>';
+      case 'landlord':
+        return '<div class="party"><div class="party-h">Landlord</div><table class="kv">' +
+          kvRow('Name', fillText('{{LandlordName}}', f, mode)) +
+          kvRow('Address for service', fillText('{{LandlordAddress}}', f, mode)) +
+          kvRow('Email', fillText('{{LandlordEmail}}', f, mode)) +
+          kvRow('Phone', fillText('{{LandlordPhone}}', f, mode)) +
+          kvRow('Mobile', fillText('{{LandlordMobile}}', f, mode)) + '</table></div>';
+      case 'tenants':
+        return env.signers.filter(function (s) { return s.kind === 'tenant'; })
+          .map(function (s) { return renderParty(s, env, mode); }).join('');
+      case 'signatures': return '<div class="sigs">' + renderSignatures(env, opts) + '</div>';
+      default: return '';
+    }
+  }
+
+  /** Returns {title, subtitle, intro, sections:[{id, heading, html}]} */
+  function renderAgreement(env, opts) {
+    opts = opts || {};
+    var f = buildFields(env), tpl = env.template;
+    return {
+      title: tpl.title,
+      subtitle: tpl.subtitle,
+      intro: fillText(tpl.intro, f, opts.mode),
+      sections: tpl.sections.map(function (sec) {
+        return {
+          id: sec.id,
+          heading: sec.heading,
+          html: sec.blocks.filter(function (b) { return cond(b, f); })
+            .map(function (b) { return renderBlock(b, env, f, opts); }).join('')
+        };
+      })
+    };
+  }
+
+  var EVENT_TEXT = {
+    AGREEMENT_CREATED: 'Agreement created; terms locked and fingerprinted',
+    INVITE_SENT: 'Signing link emailed',
+    LINK_ISSUED: 'New signing link issued',
+    EMAIL_FAILED: 'Email could not be sent',
+    DOCUMENT_OPENED: 'Signing link opened',
+    ELECTRONIC_SIGNING_CONSENT: 'Agreed to sign electronically',
+    CODE_SENT: 'One-time code emailed',
+    CODE_FAILED: 'Wrong one-time code entered',
+    IDENTITY_VERIFIED: 'Email address verified with one-time code',
+    DOCUMENT_REVIEWED: 'Read the agreement to the end',
+    SIGNED: 'Signed',
+    DECLINED: 'Declined to sign',
+    CANCELLED: 'Agreement cancelled',
+    EXPIRED: 'Signing links expired',
+    ALL_PARTIES_SIGNED: 'All parties have signed',
+    SIGNED_DOCUMENT_CREATED: 'Signed document created and fingerprinted',
+    COPIES_SENT: 'Signed copies emailed to every party'
+  };
+
+  function describeEvent(ev) {
+    var d = ev.details || {};
+    var t = EVENT_TEXT[ev.type] || ev.type;
+    var extra = [];
+    if (d.signer) extra.push(roleLabel(d.signer));
+    if (d.to) extra.push('to ' + (Array.isArray(d.to) ? d.to.join(', ') : d.to));
+    if (d.channel) extra.push('via ' + d.channel);
+    if (d.reason) extra.push('reason: ' + d.reason);
+    if (d.secondsOnPage) extra.push(d.secondsOnPage + 's on page');
+    if (d.attemptsLeft !== undefined) extra.push(d.attemptsLeft + ' attempts left');
+    if (d.sha256) extra.push('SHA-256 ' + d.sha256);
+    return t + (extra.length ? ' (' + extra.join('; ') + ')' : '');
+  }
+
+  function clientText(c) {
+    if (!c) return '';
+    var parts = [];
+    if (c.ip) parts.push('IP ' + c.ip + ' (reported by device)');
+    if (c.ua) parts.push(c.ua);
+    if (c.tz) parts.push('time zone ' + c.tz);
+    return parts.join('; ');
+  }
+
+  var PRINT_CSS =
+    '@page{size:A4;margin:16mm 14mm}' +
+    'body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;line-height:1.45;color:#111}' +
+    'h1{font-size:17pt;margin:0 0 2px}h2{font-size:12.5pt;margin:16px 0 6px;border-bottom:1px solid #999;padding-bottom:2px}' +
+    'h3{font-size:11pt;margin:12px 0 4px}h4{font-size:10.5pt;margin:10px 0 2px}' +
+    '.sub{color:#444;margin:0 0 10px}.muted{color:#666}p{margin:5px 0}' +
+    'table{border-collapse:collapse;width:100%}table.kv th{text-align:left;vertical-align:top;width:34%;padding:3px 6px;background:#f2f4f4;border:1px solid #ccc;font-weight:600}' +
+    'table.kv td{padding:3px 6px;border:1px solid #ccc;vertical-align:top}' +
+    '.party{margin:6px 0 10px;page-break-inside:avoid}.party-h{font-weight:700;margin-bottom:3px}' +
+    'ol.terms{margin:4px 0 4px 18px;padding:0}ol.terms li{margin:2px 0}' +
+    '.sigs{margin-top:6px}.sig{border:1px solid #bbb;padding:8px;margin:0 0 8px;page-break-inside:avoid}' +
+    '.sig-role{font-size:9pt;color:#555}.sig-name{font-weight:700}.sig-box{height:70px;margin:4px 0;border-bottom:1px solid #333}' +
+    '.sig-box img{height:68px;max-width:100%}.sig-meta{font-size:8.5pt;color:#444}' +
+    '.pb{page-break-before:always}' +
+    '.cert-h{background:#0f766e;color:#fff;padding:8px 10px;font-size:13pt;font-weight:700}' +
+    'table.log{font-size:8pt}table.log th,table.log td{border:1px solid #ccc;padding:2px 4px;vertical-align:top;text-align:left}' +
+    'table.log th{background:#f2f4f4}.mono{font-family:Consolas,Menlo,monospace;font-size:8pt;word-break:break-all}' +
+    '.fp{background:#f6faf9;border:1px solid #9cc;padding:6px 8px;margin:6px 0}';
+
+  function renderCertificate(env, events, opts) {
+    opts = opts || {};
+    var fmt = opts.fmt || function (x) { return x; };
+    var images = opts.images || {};
+    var chain = verifyChain(env.id, events);
+    var h = '<div class="cert-h">Signing certificate</div>';
+    h += '<table class="kv">' +
+      kvRow('Agreement', esc(env.title) + ' <span class="muted">(' + esc(env.id) + ')</span>') +
+      kvRow('Status', esc(env.status) + (env.completedAt ? ' on ' + esc(fmt(env.completedAt)) : '')) +
+      kvRow('Created', esc(fmt(env.createdAt)) + ' by ' + esc(env.createdBy || 'landlord')) +
+      kvRow('Template', esc(env.template.title) + ' v' + esc(env.template.version) + ' (' + esc(env.template.id) + ')') +
+      kvRow('Signing method', 'Personal link sent to each signer\'s email; email address verified with a one-time code before signing; ' +
+        'agreement to sign electronically recorded; agreement read to the end; drawn signature plus typed full name; signers signed in order, landlord last.') +
+      '</table>';
+    h += '<h3>Fingerprints (SHA-256)</h3>';
+    h += '<div class="fp"><b>Agreement terms</b> (locked when sent; every signer signed this exact version):<div class="mono">' + esc(env.termsHash) + '</div></div>';
+    h += '<div class="fp"><b>Audit trail</b> (' + events.length + ' events, hash-chained; ' + (chain.ok ? 'chain verified' : 'CHAIN BROKEN at event ' + chain.brokenAt) + '):<div class="mono">' + esc(chain.head) + '</div></div>';
+    h += '<p class="muted">The fingerprint of this document file can\'t be printed inside the file itself. It is recorded in the audit trail and in the email that delivered this copy. ' +
+      (opts.verifyUrl ? 'Anyone holding a copy can check it is unaltered at ' + esc(opts.verifyUrl) + '.' : '') + '</p>';
+
+    h += '<h3>Signers</h3>';
+    env.signers.forEach(function (s) {
+      var d = signerDetails(s), sig = s.signature || {};
+      h += '<div class="party"><div class="party-h">' + esc(roleLabel(s.role)) + ': ' + esc(d.name) + '</div><table class="kv">' +
+        kvRow('Email', esc(d.email || s.email)) +
+        kvRow('Status', esc(s.status)) +
+        kvRow('Link first sent', esc(fmt(s.sentAt))) +
+        kvRow('Link opened', esc(fmt(s.openedAt))) +
+        kvRow('Agreed to sign electronically', esc(fmt(s.consentAt))) +
+        kvRow('Email verified (one-time code)', esc(fmt(s.verifiedAt))) +
+        kvRow('Read to the end', esc(fmt(s.reviewedAt))) +
+        kvRow('Signed', esc(fmt(s.signedAt))) +
+        (sig.client ? kvRow('Device', esc(clientText(sig.client))) : '') +
+        (sig.typedName ? kvRow('Typed name', esc(sig.typedName)) : '') +
+        (images[s.id] ? kvRow('Signature', '<img style="height:50px" src="' + esc(images[s.id]) + '">') : '') +
+        (sig.imageSha256 ? kvRow('Signature image SHA-256', '<span class="mono">' + esc(sig.imageSha256) + '</span>') : '') +
+        (sig.detailsHash ? kvRow('Confirmed details SHA-256', '<span class="mono">' + esc(sig.detailsHash) + '</span>') : '') +
+        (sig.recordHash ? kvRow('Signature record SHA-256', '<span class="mono">' + esc(sig.recordHash) + '</span>') : '') +
+        '</table></div>';
+    });
+
+    h += '<h3>Audit trail</h3><table class="log"><tr><th>#</th><th>Time (NZ)</th><th>Event</th><th>By</th><th>Device</th><th>Hash</th></tr>';
+    events.forEach(function (ev) {
+      h += '<tr><td>' + ev.seq + '</td><td>' + esc(fmt(ev.at)) + '<br><span class="muted">' + esc(ev.at) + '</span></td><td>' +
+        esc(describeEvent(ev)) + '</td><td>' + esc(ev.actor) + '</td><td>' + esc(clientText(ev.client)) +
+        '</td><td class="mono">' + esc(String(ev.hash).slice(0, 16)) + '&hellip;</td></tr>';
+    });
+    h += '</table>';
+    h += '<p class="muted">Each audit event includes the hash of the event before it, so changing, removing or reordering any event breaks the chain. ' +
+      'Times are recorded by the server in UTC and shown in New Zealand time. Device details and IP addresses are reported by the signer\'s browser.</p>';
+    return h;
+  }
+
+  function renderAgreementBody(env, a) {
+    var h = '<h1>' + esc(a.title) + '</h1><div class="sub">' + esc(a.subtitle) + ' &middot; ' + esc(env.id) + '</div>';
+    h += '<p>' + a.intro + '</p>';
+    a.sections.forEach(function (s) { h += '<h2>' + esc(s.heading) + '</h2>' + s.html; });
+    return h;
+  }
+
+  /** The complete signed record: agreement, signatures and certificate. */
+  function renderFinalHtml(env, events, opts) {
+    opts = opts || {};
+    var a = renderAgreement(env, { mode: 'final', images: opts.images, fmt: opts.fmt });
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(env.title) + ' (' + esc(env.id) + ')</title>' +
+      '<style>' + PRINT_CSS + '</style></head><body>' + renderAgreementBody(env, a) +
+      '<div class="pb"></div>' + renderCertificate(env, events, opts) + '</body></html>';
+  }
+
+  /** Unsigned preview, for the landlord before sending. */
+  function renderPreviewHtml(env) {
+    var a = renderAgreement(env, { mode: 'final' });
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview</title><style>' + PRINT_CSS +
+      '</style></head><body>' + renderAgreementBody(env, a) + '</body></html>';
+  }
+
+  /* =====================================================================
+   * Audit chain
+   * ===================================================================== */
+
+  function genesisHash(envId) { return sha256('tenancy-esign|genesis|' + envId); }
+
+  function hashEvent(ev) {
+    var c = {};
+    Object.keys(ev).forEach(function (k) { if (k !== 'hash') c[k] = ev[k]; });
+    return hashOf(c);
+  }
+
+  function verifyChain(envId, events) {
+    var prev = genesisHash(envId);
+    for (var i = 0; i < events.length; i++) {
+      var ev = events[i];
+      if (ev.envelopeId !== envId || ev.seq !== i + 1 || ev.prevHash !== prev || hashEvent(ev) !== ev.hash) {
+        return { ok: false, count: events.length, brokenAt: i + 1, head: prev };
+      }
+      prev = ev.hash;
+    }
+    return { ok: true, count: events.length, head: prev };
+  }
+
+  function cleanClient(c) {
+    if (!c || typeof c !== 'object') return null;
+    var out = {};
+    ['ip', 'ua', 'tz', 'lang', 'screen', 'platform'].forEach(function (k) {
+      if (c[k] !== undefined && c[k] !== null && c[k] !== '') out[k] = String(c[k]).slice(0, k === 'ua' ? 300 : 80);
+    });
+    return Object.keys(out).length ? out : null;
+  }
+
+  /* =====================================================================
+   * Engine
+   *
+   * store: getEnvelope(id), saveEnvelope(env), listEnvelopes(), appendAudit(ev), listAudit(id)
+   * svc:   config, templates, now(), today(), fmt(iso), randomString(n), randomDigits(n),
+   *        sendEmail({to, subject, text, html, attachFinal}), saveImage(envId, name, dataUrl) -> {ref, sha256},
+   *        loadImage(ref) -> dataUrl, storeFinal(env, html) -> {ref, url, sha256, name, mime},
+   *        readFinal(ref) -> {name, mime, base64}, notify(payload) [optional]
+   * ===================================================================== */
+
+  function createEngine(store, svc) {
+    var cfg = svc.config || {};
+    var LINK_DAYS = cfg.linkDays || 14;
+    var OTP_MINUTES = cfg.otpMinutes || 10;
+    var VERIFY_MINUTES = cfg.verifyWindowMinutes || 30;
+    var MAX_CODE_ATTEMPTS = 5;
+    var MAX_CODES_PER_HOUR = 5;
+    var ownerName = cfg.ownerName || 'The landlord';
+
+    function now() { return svc.now(); }
+    function iso() { return now().toISOString(); }
+    function fmt(x) { return x ? svc.fmt(x) : ''; }
+    function minutesSince(x) { return x ? (now().getTime() - new Date(x).getTime()) / 60000 : Infinity; }
+
+    function fail(msg, code) { var e = new Error(msg); e.code = code || 'BAD_REQUEST'; throw e; }
+
+    function audit(env, type, actor, details, client) {
+      var ev = {
+        envelopeId: env.id,
+        seq: (env.auditCount || 0) + 1,
+        at: iso(),
+        type: type,
+        actor: actor || 'system',
+        details: details || {},
+        client: cleanClient(client),
+        prevHash: env.auditHead || genesisHash(env.id)
+      };
+      ev.hash = hashEvent(ev);
+      store.appendAudit(ev);
+      env.auditCount = ev.seq;
+      env.auditHead = ev.hash;
+      env.updatedAt = ev.at;
+      return ev;
+    }
+
+    function actorOf(s) { return roleLabel(s.role) + ' ' + signerDetails(s).name + ' <' + s.email + '>'; }
+
+    function notify(env, what) {
+      if (typeof svc.notify !== 'function') return;
+      try {
+        svc.notify({ event: what, agreement: summary(env) });
+      } catch (e) { /* webhooks are best effort */ }
+    }
+
+    /* ---------- email ---------- */
+
+    function button(link, label) {
+      return '<p style="margin:22px 0"><a href="' + esc(link) + '" style="background:#0f766e;color:#fff;padding:14px 22px;' +
+        'border-radius:10px;text-decoration:none;font-weight:bold;display:inline-block;font-size:17px">' + esc(label) + '</a></p>';
+    }
+
+    function wrapHtml(inner) {
+      return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:16px;line-height:1.5;color:#111;max-width:560px">' + inner + '</div>';
+    }
+
+    function mail(env, m) {
+      try {
+        svc.sendEmail(m);
+        return true;
+      } catch (e) {
+        audit(env, 'EMAIL_FAILED', 'system', { to: m.to, subject: m.subject, error: String(e && e.message || e).slice(0, 200) });
+        return false;
+      }
+    }
+
+    function inviteEmail(env, s, link) {
+      var first = signerDetails(s).name.split(' ')[0];
+      var exp = fmt(env.expiresAt);
+      var subject = 'Please sign: tenancy agreement for ' + env.propertyAddress;
+      var text = 'Hi ' + first + ',\n\n' + ownerName + ' has sent you the tenancy agreement for ' + env.propertyAddress +
+        ' to read and sign. It takes about 5 minutes and works on your phone.\n\nOpen your personal signing link:\n' + link +
+        '\n\nThe link is just for you, so please don\'t forward it. It expires on ' + exp + '.\n\nThanks,\n' + ownerName;
+      var html = wrapHtml('<p>Hi ' + esc(first) + ',</p><p>' + esc(ownerName) + ' has sent you the tenancy agreement for <b>' +
+        esc(env.propertyAddress) + '</b> to read and sign. It takes about 5 minutes and works on your phone.</p>' +
+        button(link, 'Review and sign') +
+        '<p style="color:#555;font-size:14px">This link is just for you, so please don\'t forward it. It expires on ' + esc(exp) + '.</p>' +
+        '<p>Thanks,<br>' + esc(ownerName) + '</p>');
+      return { to: s.email, subject: subject, text: text, html: html, kind: 'invite', link: link };
+    }
+
+    /* ---------- tokens and lookups ---------- */
+
+    function issueToken(env, s) {
+      var token = svc.randomString(48);
+      s.tokenHash = sha256('token|' + token);
+      s.tokenIssuedAt = iso();
+      var base = cfg.signUrl || 'sign.html';
+      return base + (base.indexOf('?') >= 0 ? '&' : '?') + 't=' + token;
+    }
+
+    function currentSigner(env) {
+      for (var i = 0; i < env.signers.length; i++) if (env.signers[i].status !== 'Signed') return env.signers[i];
+      return null;
+    }
+
+    function sendInvite(env, s, reason, actor) {
+      var link = issueToken(env, s);
+      if (s.status === 'Waiting') s.status = 'Sent';
+      if (!s.sentAt) s.sentAt = iso();
+      var ok = mail(env, inviteEmail(env, s, link));
+      if (ok) audit(env, 'INVITE_SENT', actor || 'system', { signer: s.role, to: s.email, reason: reason || '' });
+      return { link: link, emailed: ok };
+    }
+
+    function expireIfNeeded(env) {
+      if (env.status === 'Sent' && env.expiresAt && now().getTime() > new Date(env.expiresAt).getTime()) {
+        env.status = 'Expired';
+        audit(env, 'EXPIRED', 'system', {});
+        store.saveEnvelope(env);
+        notify(env, 'expired');
+      }
+      return env;
+    }
+
+    function loadEnv(id) {
+      var env = store.getEnvelope(str(id));
+      if (!env) fail('That agreement wasn\'t found.', 'NOT_FOUND');
+      return expireIfNeeded(env);
+    }
+
+    function bySignerToken(token) {
+      token = str(token);
+      if (token.length < 20) fail('This signing link is incomplete. Open it again from your email.', 'BAD_LINK');
+      var h = sha256('token|' + token);
+      var list = store.listEnvelopes();
+      for (var i = 0; i < list.length; i++) {
+        for (var j = 0; j < list[i].signers.length; j++) {
+          if (list[i].signers[j].tokenHash && safeEqual(list[i].signers[j].tokenHash, h)) {
+            var env = expireIfNeeded(list[i]);
+            return { env: env, signer: env.signers[j] };
+          }
+        }
+      }
+      fail('This signing link isn\'t valid any more. A newer link may have been sent: check your latest email or text, or ask the landlord for a new one.', 'BAD_LINK');
+    }
+
+    function assertMyTurn(env, s) {
+      if (env.status === 'Completed') fail('This agreement has already been signed by everyone.', 'DONE');
+      if (env.status === 'Cancelled') fail('This agreement was cancelled by the landlord.', 'CANCELLED');
+      if (env.status === 'Declined') fail('This agreement was declined, so it can\'t be signed.', 'DECLINED');
+      if (env.status === 'Expired') fail('This signing link has expired. Ask the landlord to send the agreement again.', 'EXPIRED');
+      if (s.status === 'Signed') fail('You have already signed this agreement.', 'ALREADY_SIGNED');
+      var cur = currentSigner(env);
+      if (!cur || cur.id !== s.id) fail('It isn\'t your turn to sign yet. We\'ll email you when ' + signerDetails(cur).name + ' has signed.', 'NOT_YOUR_TURN');
+    }
+
+    /* ---------- views ---------- */
+
+    function signerSummary(s) {
+      return {
+        id: s.id, role: s.role, kind: s.kind, name: signerDetails(s).name, email: s.email, status: s.status,
+        sentAt: s.sentAt || null, openedAt: s.openedAt || null, consentAt: s.consentAt || null,
+        verifiedAt: s.verifiedAt || null, reviewedAt: s.reviewedAt || null, signedAt: s.signedAt || null,
+        declinedAt: s.declinedAt || null
+      };
+    }
+
+    function summary(env) {
+      var signed = env.signers.filter(function (s) { return s.status === 'Signed'; }).length;
+      return {
+        id: env.id, title: env.title, propertyAddress: env.propertyAddress, status: env.status,
+        createdAt: env.createdAt, createdBy: env.createdBy, expiresAt: env.expiresAt,
+        completedAt: env.completedAt || null, updatedAt: env.updatedAt,
+        progress: signed + '/' + env.signers.length,
+        source: env.source || null,
+        final: env.final ? { sha256: env.final.sha256, name: env.final.name, url: env.final.url || null } : null,
+        signers: env.signers.map(signerSummary)
+      };
+    }
+
+    function signerView(env, s) {
+      var cur = currentSigner(env);
+      var verified = !!s.verifiedAt && minutesSince(s.verifiedAt) < VERIFY_MINUTES;
+      return {
+        app: cfg.appName || 'Tenancy e-sign',
+        ownerName: ownerName,
+        agreement: {
+          id: env.id, title: env.title, status: env.status, propertyAddress: env.propertyAddress,
+          expiresAt: env.expiresAt, completedAt: env.completedAt || null, finalAvailable: !!env.final,
+          finalSha256: env.final ? env.final.sha256 : null
+        },
+        me: {
+          id: s.id, role: s.role, roleLabel: roleLabel(s.role), kind: s.kind, status: s.status,
+          name: signerDetails(s).name, emailMasked: maskEmail(s.email),
+          consentAt: s.consentAt || null, codeSentAt: s.otp ? s.otp.sentAt : null, verified: verified,
+          verifiedAt: s.verifiedAt || null, reviewedAt: s.reviewedAt || null, signedAt: s.signedAt || null,
+          details: clone(signerDetails(s))
+        },
+        isMyTurn: env.status === 'Sent' && !!cur && cur.id === s.id,
+        waitingFor: env.status === 'Sent' && cur && cur.id !== s.id && s.status !== 'Signed' ?
+          { roleLabel: roleLabel(cur.role), name: signerDetails(cur).name } : null,
+        signers: env.signers.map(function (x) {
+          return { roleLabel: roleLabel(x.role), name: signerDetails(x).name, status: x.status, signedAt: x.signedAt || null, isMe: x.id === s.id };
+        }),
+        termsHash: env.termsHash,
+        document: renderAgreement(env, { mode: 'view', fmt: fmt }),
+        fields: FIELD_DEFS[s.kind],
+        consentText: CONSENT_TEXT,
+        agreeText: AGREE_TEXT
+      };
+    }
+
+    function adminView(env) {
+      var events = store.listAudit(env.id);
+      return {
+        agreement: summary(env),
+        landlord: clone(env.landlord),
+        terms: clone(env.terms),
+        termsHash: env.termsHash,
+        template: { id: env.template.id, version: env.template.version, hash: env.templateHash },
+        signers: env.signers.map(function (s) {
+          var o = signerSummary(s);
+          o.details = clone(signerDetails(s));
+          o.signature = s.signature ? {
+            imageSha256: s.signature.imageSha256, detailsHash: s.signature.detailsHash,
+            recordHash: s.signature.recordHash, typedName: s.signature.typedName, client: s.signature.client
+          } : null;
+          o.declineReason = s.declineReason || null;
+          return o;
+        }),
+        events: events.map(function (ev) { var c = clone(ev); c.text = describeEvent(ev); return c; }),
+        chain: verifyChain(env.id, events)
+      };
+    }
+
+    function termsHashOf(env) {
+      return hashOf({
+        templateId: env.template.id, templateVersion: env.template.version, templateHash: env.templateHash,
+        propertyAddress: env.propertyAddress, landlord: env.landlord, terms: env.terms,
+        tenantsPrefill: env.signers.map(function (s) { return { role: s.role, email: s.email }; })
+      });
+    }
+
+    /* ---------- admin actions ---------- */
+
+    function create(input, actor) {
+      var templates = svc.templates || {};
+      var r = validateCreate(input, svc.today());
+      if (r.errors.length) fail(r.errors.join('\n'), 'INVALID');
+      var v = r.value;
+      var tpl = templates[v.templateId];
+      if (!tpl) fail('Unknown agreement template: ' + v.templateId, 'INVALID');
+
+      var t = iso();
+      var id = 'AGR-' + svc.today().replace(/-/g, '') + '-' + svc.randomString(5).toUpperCase();
+      var env = {
+        id: id,
+        schema: 1,
+        status: 'Sent',
+        title: 'Tenancy agreement: ' + v.propertyAddress,
+        propertyAddress: v.propertyAddress,
+        createdAt: t,
+        createdBy: actor || 'landlord',
+        sentAt: t,
+        expiresAt: new Date(now().getTime() + LINK_DAYS * 86400000).toISOString(),
+        template: clone(tpl),
+        templateHash: hashOf(tpl),
+        landlord: v.landlord,
+        terms: v.terms,
+        source: v.source,
+        signers: [],
+        auditCount: 0,
+        auditHead: null
+      };
+      v.tenants.forEach(function (tn, i) {
+        env.signers.push({
+          id: 'T' + (i + 1), role: 'Tenant' + (i + 1), kind: 'tenant', order: i + 1, email: tn.email, ref: tn.ref || null,
+          prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, under18: tn.under18, addressForService: '' },
+          dob: tn.dob || null, status: 'Waiting'
+        });
+      });
+      env.signers.push({
+        id: 'L', role: 'Landlord', kind: 'landlord', order: v.tenants.length + 1, email: v.landlord.email,
+        prefill: { name: v.landlord.signerName, email: v.landlord.email, capacity: 'Landlord' }, status: 'Waiting'
+      });
+      env.termsHash = termsHashOf(env);
+
+      audit(env, 'AGREEMENT_CREATED', actor || 'landlord', {
+        termsHash: env.termsHash, templateId: tpl.id, templateVersion: tpl.version, templateHash: env.templateHash,
+        signingOrder: env.signers.map(function (s) { return roleLabel(s.role) + ': ' + signerDetails(s).name + ' <' + s.email + '>'; }),
+        expiresAt: env.expiresAt, warnings: r.warnings
+      });
+      var inv = sendInvite(env, env.signers[0], 'first signer', 'system');
+      store.saveEnvelope(env);
+      notify(env, 'sent');
+      return { agreement: summary(env), warnings: r.warnings, firstLink: inv.emailed ? null : inv.link };
+    }
+
+    function issueLink(id, signerId, channel, actor) {
+      var env = loadEnv(id);
+      if (env.status !== 'Sent') fail('This agreement is ' + env.status.toLowerCase() + ', so no new links can be sent.');
+      var s = env.signers.filter(function (x) { return x.id === signerId; })[0];
+      if (!s) fail('Signer not found.');
+      var cur = currentSigner(env);
+      if (!cur || cur.id !== s.id) fail('Only the person whose turn it is can be sent a link. Right now that is ' + signerDetails(cur).name + '.');
+      var out;
+      if (channel === 'email') {
+        out = sendInvite(env, s, 'resent by ' + (actor || 'landlord'), actor);
+        if (!out.emailed) fail('The email couldn\'t be sent. Use Copy link or Text link instead.');
+        out = { emailed: true, link: null };
+      } else {
+        var link = issueToken(env, s);
+        if (s.status === 'Waiting') s.status = 'Sent';
+        if (!s.sentAt) s.sentAt = iso();
+        audit(env, 'LINK_ISSUED', actor || 'landlord', { signer: s.role, channel: channel === 'sms' ? 'text message' : 'copied link' });
+        var first = signerDetails(s).name.split(' ')[0];
+        out = {
+          link: link,
+          smsBody: 'Hi ' + first + ', here is your link to sign the tenancy agreement for ' + env.propertyAddress + ': ' + link + ' - ' + ownerName
+        };
+      }
+      store.saveEnvelope(env);
+      return out;
+    }
+
+    function cancel(id, reason, actor) {
+      var env = loadEnv(id);
+      if (env.status !== 'Sent') fail('Only an agreement that is still out for signing can be cancelled.');
+      reason = str(reason) || 'No reason given';
+      env.status = 'Cancelled';
+      env.cancelledAt = iso();
+      audit(env, 'CANCELLED', actor || 'landlord', { reason: reason });
+      env.signers.forEach(function (s) {
+        if (s.sentAt && s.status !== 'Signed' && s.kind === 'tenant') {
+          mail(env, {
+            to: s.email, kind: 'cancelled',
+            subject: 'Cancelled: tenancy agreement for ' + env.propertyAddress,
+            text: 'Hi ' + signerDetails(s).name.split(' ')[0] + ',\n\nThe tenancy agreement for ' + env.propertyAddress +
+              ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' + ownerName,
+            html: wrapHtml('<p>Hi ' + esc(signerDetails(s).name.split(' ')[0]) + ',</p><p>The tenancy agreement for <b>' + esc(env.propertyAddress) +
+              '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p><p>' + esc(ownerName) + '</p>')
+          });
+        }
+      });
+      store.saveEnvelope(env);
+      notify(env, 'cancelled');
+      return summary(env);
+    }
+
+    /* ---------- signer actions ---------- */
+
+    function open(token, client) {
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      if (!s.openedAt) {
+        s.openedAt = iso();
+        if (s.status === 'Sent') s.status = 'Opened';
+      }
+      audit(env, 'DOCUMENT_OPENED', actorOf(s), { signer: s.role, status: env.status }, client);
+      store.saveEnvelope(env);
+      return signerView(env, s);
+    }
+
+    function consent(token, client) {
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      assertMyTurn(env, s);
+      s.consentAt = iso();
+      audit(env, 'ELECTRONIC_SIGNING_CONSENT', actorOf(s), { signer: s.role, statement: CONSENT_TEXT }, client);
+      store.saveEnvelope(env);
+      return signerView(env, s);
+    }
+
+    function sendCode(token, client) {
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      assertMyTurn(env, s);
+      if (!s.consentAt) fail('Please agree to sign electronically first.');
+      var recent = (s.codeTimes || []).filter(function (x) { return minutesSince(x) < 60; });
+      if (recent.length >= MAX_CODES_PER_HOUR) fail('Too many codes have been sent. Please wait an hour and try again, or contact ' + ownerName + '.', 'RATE');
+      var code = svc.randomDigits(6);
+      s.otp = { hash: sha256('otp|' + env.id + '|' + s.id + '|' + code), sentAt: iso(), attempts: 0 };
+      s.otp.expiresAt = new Date(now().getTime() + OTP_MINUTES * 60000).toISOString();
+      recent.push(s.otp.sentAt);
+      s.codeTimes = recent;
+      var ok = mail(env, {
+        to: s.email, kind: 'code', code: code,
+        subject: code + ' is your signing code',
+        text: 'Your code to sign the tenancy agreement for ' + env.propertyAddress + ' is:\n\n' + code +
+          '\n\nIt expires in ' + OTP_MINUTES + ' minutes. If you didn\'t ask for this code, you can ignore this email.',
+        html: wrapHtml('<p>Your code to sign the tenancy agreement for <b>' + esc(env.propertyAddress) + '</b> is:</p>' +
+          '<p style="font-size:30px;letter-spacing:6px;font-weight:bold;margin:16px 0">' + code + '</p>' +
+          '<p style="color:#555;font-size:14px">It expires in ' + OTP_MINUTES + ' minutes. If you didn\'t ask for this code, you can ignore this email.</p>')
+      });
+      if (!ok) { store.saveEnvelope(env); fail('We couldn\'t email your code just now. Please try again in a minute.'); }
+      audit(env, 'CODE_SENT', actorOf(s), { signer: s.role, to: s.email }, client);
+      store.saveEnvelope(env);
+      return { sentTo: maskEmail(s.email), expiresInMinutes: OTP_MINUTES };
+    }
+
+    function verifyCode(token, code, client) {
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      assertMyTurn(env, s);
+      code = str(code).replace(/\s/g, '');
+      if (!s.otp) fail('Please ask for a new code.', 'NO_CODE');
+      if (now().getTime() > new Date(s.otp.expiresAt).getTime()) { s.otp = null; store.saveEnvelope(env); fail('That code has expired. Please ask for a new one.', 'CODE_EXPIRED'); }
+      if (!safeEqual(sha256('otp|' + env.id + '|' + s.id + '|' + code), s.otp.hash)) {
+        s.otp.attempts++;
+        var left = MAX_CODE_ATTEMPTS - s.otp.attempts;
+        audit(env, 'CODE_FAILED', actorOf(s), { signer: s.role, attemptsLeft: Math.max(left, 0) }, client);
+        if (left <= 0) s.otp = null;
+        store.saveEnvelope(env);
+        fail(left > 0 ? 'That code isn\'t right. You have ' + left + ' more ' + (left === 1 ? 'try' : 'tries') + '.' :
+          'Too many wrong codes. Please ask for a new code.', 'BAD_CODE');
+      }
+      s.otp = null;
+      s.verifiedAt = iso();
+      if (s.status === 'Sent' || s.status === 'Opened') s.status = 'Verified';
+      audit(env, 'IDENTITY_VERIFIED', actorOf(s), { signer: s.role, method: 'one-time code sent to ' + s.email }, client);
+      store.saveEnvelope(env);
+      return signerView(env, s);
+    }
+
+    function reviewed(token, info, client) {
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      assertMyTurn(env, s);
+      if (!s.verifiedAt) fail('Please verify your email first.');
+      info = info || {};
+      if (str(info.termsHash) !== env.termsHash) fail('The agreement has changed since you opened it. Please reload the page.', 'STALE');
+      s.reviewedAt = iso();
+      audit(env, 'DOCUMENT_REVIEWED', actorOf(s), {
+        signer: s.role, termsHash: env.termsHash, secondsOnPage: Math.max(0, Math.round(Number(info.secondsOnPage) || 0))
+      }, client);
+      store.saveEnvelope(env);
+      return signerView(env, s);
+    }
+
+    function submit(token, p, client) {
+      p = p || {};
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      if (s.status === 'Signed' && s.signature && p.submissionId && s.signature.submissionId === str(p.submissionId)) {
+        return signerView(env, s); // a retried request that already succeeded
+      }
+      assertMyTurn(env, s);
+      if (!s.consentAt) fail('Please agree to sign electronically first.');
+      if (!s.verifiedAt || minutesSince(s.verifiedAt) >= VERIFY_MINUTES) {
+        fail('For security, please verify your email again (it has been more than ' + VERIFY_MINUTES + ' minutes).', 'REVERIFY');
+      }
+      if (!s.reviewedAt) fail('Please read the agreement to the end first.');
+      if (str(p.termsHash) !== env.termsHash) fail('The agreement has changed since you opened it. Please reload the page.', 'STALE');
+      if (p.agree !== true) fail('Please tick the box to confirm you agree.');
+
+      var dv = validateDetails(s.kind, p.details, signerDetails(s));
+      if (dv.errors.length) fail(dv.errors.join('\n'), 'INVALID');
+      var details = dv.value;
+      details.email = s.email;
+
+      var typed = str(p.typedName);
+      if (!typed) fail('Type your full name.');
+      if (normName(typed) !== normName(details.name)) fail('The typed name must match your full legal name: ' + details.name + '.');
+
+      var png = str(p.signaturePng);
+      if (!/^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(png) || png.length < 400) fail('Please draw your signature.');
+      if (png.length > 600000) fail('The signature image is too large. Please clear it and sign again.');
+      var strokes = p.strokes || {};
+      if (!(Number(strokes.count) >= 1)) fail('Please draw your signature.');
+
+      var signedAt = iso();
+      var img = svc.saveImage(env.id, env.id + '-' + s.role + '-signature.png', png);
+      var detailsHash = hashOf(details);
+      var sig = {
+        submissionId: str(p.submissionId) || null,
+        imageRef: img.ref,
+        imageSha256: img.sha256,
+        typedName: typed,
+        termsHash: env.termsHash,
+        detailsHash: detailsHash,
+        signedAt: signedAt,
+        strokes: { count: Number(strokes.count) || 0, points: Number(strokes.points) || 0, ms: Number(strokes.ms) || 0 },
+        statement: AGREE_TEXT,
+        client: cleanClient(client)
+      };
+      sig.recordHash = hashOf({
+        agreementId: env.id, role: s.role, email: s.email, termsHash: sig.termsHash, detailsHash: detailsHash,
+        imageSha256: sig.imageSha256, typedName: typed, signedAt: signedAt, statement: AGREE_TEXT
+      });
+      s.details = details;
+      s.signature = sig;
+      s.signedAt = signedAt;
+      s.status = 'Signed';
+      s.otp = null;
+      audit(env, 'SIGNED', actorOf(s), {
+        signer: s.role, name: details.name, typedName: typed, statement: AGREE_TEXT,
+        termsHash: env.termsHash, detailsHash: detailsHash, signatureSha256: img.sha256, recordHash: sig.recordHash,
+        strokes: sig.strokes
+      }, client);
+
+      var next = currentSigner(env);
+      if (next) {
+        sendInvite(env, next, 'after ' + roleLabel(s.role) + ' signed', 'system');
+        if (cfg.ownerEmail && cfg.notifyOwnerEachSignature !== false && s.kind !== 'landlord') {
+          var done = env.signers.filter(function (x) { return x.status === 'Signed'; }).length;
+          mail(env, {
+            to: cfg.ownerEmail, kind: 'notice',
+            subject: details.name + ' signed (' + done + '/' + env.signers.length + '): ' + env.propertyAddress,
+            text: details.name + ' signed the tenancy agreement for ' + env.propertyAddress + '. Next to sign: ' +
+              signerDetails(next).name + ' (' + roleLabel(next.role) + ').',
+            html: wrapHtml('<p><b>' + esc(details.name) + '</b> signed the tenancy agreement for ' + esc(env.propertyAddress) +
+              '.</p><p>Next to sign: ' + esc(signerDetails(next).name) + ' (' + esc(roleLabel(next.role)) + ').</p>')
+          });
+        }
+        store.saveEnvelope(env);
+        notify(env, 'signed');
+      } else {
+        complete(env);
+      }
+      return signerView(env, s);
+    }
+
+    function complete(env) {
+      env.status = 'Completed';
+      env.completedAt = iso();
+      audit(env, 'ALL_PARTIES_SIGNED', 'system', {
+        termsHash: env.termsHash,
+        signatures: env.signers.map(function (s) { return { signer: s.role, recordHash: s.signature.recordHash }; })
+      });
+      var images = {};
+      env.signers.forEach(function (s) { images[s.id] = svc.loadImage(s.signature.imageRef); });
+      var events = store.listAudit(env.id);
+      var html = renderFinalHtml(env, events, { images: images, fmt: fmt, verifyUrl: cfg.verifyUrl });
+      var fin = svc.storeFinal(env, html);
+      env.final = { ref: fin.ref, url: fin.url || null, sha256: fin.sha256, name: fin.name, mime: fin.mime, auditHeadAtRender: env.auditHead };
+      audit(env, 'SIGNED_DOCUMENT_CREATED', 'system', { file: fin.name, sha256: fin.sha256, auditHeadAtRender: env.auditHead });
+
+      var to = env.signers.map(function (s) { return s.email; });
+      if (cfg.ownerEmail && to.indexOf(normEmail(cfg.ownerEmail)) < 0) to.push(normEmail(cfg.ownerEmail));
+      var sent = [];
+      to.forEach(function (addr) {
+        var ok = mail(env, {
+          to: addr, kind: 'completed', attachFinal: true, finalRef: fin.ref,
+          subject: 'Signed: tenancy agreement for ' + env.propertyAddress,
+          text: 'Everyone has signed the tenancy agreement for ' + env.propertyAddress + '. Your copy is attached (' + fin.name + ').\n\n' +
+            'Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:\n' +
+            'Document SHA-256: ' + fin.sha256 + '\nAudit trail SHA-256: ' + env.final.auditHeadAtRender + '\n' +
+            (cfg.verifyUrl ? '\nCheck a copy at any time: ' + cfg.verifyUrl + '\n' : '') + '\n' + ownerName,
+          html: wrapHtml('<p>Everyone has signed the tenancy agreement for <b>' + esc(env.propertyAddress) + '</b>. Your copy is attached (' + esc(fin.name) + ').</p>' +
+            '<p style="font-size:14px;color:#444">Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:<br>' +
+            'Document SHA-256: <code style="word-break:break-all">' + esc(fin.sha256) + '</code><br>' +
+            'Audit trail SHA-256: <code style="word-break:break-all">' + esc(env.final.auditHeadAtRender) + '</code></p>' +
+            (cfg.verifyUrl ? '<p style="font-size:14px">Check a copy at any time: <a href="' + esc(cfg.verifyUrl) + '">' + esc(cfg.verifyUrl) + '</a></p>' : '') +
+            '<p>' + esc(ownerName) + '</p>')
+        });
+        if (ok) sent.push(addr);
+      });
+      audit(env, 'COPIES_SENT', 'system', { to: sent, sha256: fin.sha256 });
+      store.saveEnvelope(env);
+      notify(env, 'completed');
+    }
+
+    function decline(token, reason, client) {
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      assertMyTurn(env, s);
+      reason = str(reason);
+      if (!reason) fail('Please say why, so the landlord can fix it.');
+      s.status = 'Declined';
+      s.declinedAt = iso();
+      s.declineReason = reason.slice(0, 1000);
+      env.status = 'Declined';
+      audit(env, 'DECLINED', actorOf(s), { signer: s.role, reason: s.declineReason }, client);
+      if (cfg.ownerEmail) {
+        mail(env, {
+          to: cfg.ownerEmail, kind: 'notice',
+          subject: 'Declined by ' + signerDetails(s).name + ': ' + env.propertyAddress,
+          text: signerDetails(s).name + ' declined to sign the tenancy agreement for ' + env.propertyAddress + '.\n\nReason: ' + s.declineReason,
+          html: wrapHtml('<p><b>' + esc(signerDetails(s).name) + '</b> declined to sign the tenancy agreement for ' + esc(env.propertyAddress) +
+            '.</p><p>Reason: ' + esc(s.declineReason) + '</p>')
+        });
+      }
+      store.saveEnvelope(env);
+      notify(env, 'declined');
+      return signerView(env, s);
+    }
+
+    function signerDownload(token) {
+      var f = bySignerToken(token);
+      if (!f.env.final) fail('The signed copy is ready once everyone has signed.');
+      return svc.readFinal(f.env.final.ref);
+    }
+
+    function verify(hash) {
+      hash = str(hash).toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(hash)) fail('That isn\'t a SHA-256 fingerprint (64 letters and numbers).');
+      var list = store.listEnvelopes();
+      for (var i = 0; i < list.length; i++) {
+        var env = list[i];
+        if (env.final && env.final.sha256 === hash) {
+          var chain = verifyChain(env.id, store.listAudit(env.id));
+          return {
+            found: true, id: env.id, title: env.title, propertyAddress: env.propertyAddress, completedAt: env.completedAt,
+            completedAtText: fmt(env.completedAt), termsHash: env.termsHash, auditHead: env.final.auditHeadAtRender,
+            chainOk: chain.ok, events: chain.count,
+            signers: env.signers.map(function (s) {
+              return { roleLabel: roleLabel(s.role), name: signerDetails(s).name, signedAt: s.signedAt, signedAtText: fmt(s.signedAt) };
+            })
+          };
+        }
+      }
+      return { found: false };
+    }
+
+    return {
+      create: create,
+      list: function () {
+        return store.listEnvelopes().map(expireIfNeeded).map(summary)
+          .sort(function (a, b) { return a.createdAt < b.createdAt ? 1 : -1; });
+      },
+      get: function (id) { return adminView(loadEnv(id)); },
+      issueLink: issueLink,
+      cancel: cancel,
+      adminDownload: function (id) {
+        var env = loadEnv(id);
+        if (!env.final) fail('The signed document is created once everyone has signed.');
+        return svc.readFinal(env.final.ref);
+      },
+      preview: function (input) {
+        var r = validateCreate(input, svc.today());
+        var v = r.value, tpl = (svc.templates || {})[v.templateId];
+        if (!tpl) fail('Unknown agreement template.');
+        var env = {
+          id: 'PREVIEW', template: tpl, propertyAddress: v.propertyAddress, landlord: v.landlord, terms: v.terms,
+          signers: v.tenants.map(function (tn, i) {
+            return { id: 'T' + (i + 1), role: 'Tenant' + (i + 1), kind: 'tenant', email: tn.email, status: 'Waiting',
+              prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, under18: tn.under18 } };
+          }).concat([{ id: 'L', role: 'Landlord', kind: 'landlord', email: v.landlord.email, status: 'Waiting',
+            prefill: { name: v.landlord.signerName, capacity: 'Landlord' } }])
+        };
+        return { errors: r.errors, warnings: r.warnings, html: renderPreviewHtml(env) };
+      },
+      open: open,
+      consent: consent,
+      sendCode: sendCode,
+      verifyCode: verifyCode,
+      reviewed: reviewed,
+      submit: submit,
+      decline: decline,
+      signerDownload: signerDownload,
+      verify: verify
+    };
+  }
+
+  /* =====================================================================
+   * Request router (same for the demo backend and Apps Script)
+   * ===================================================================== */
+
+  function dispatch(engine, req, opts) {
+    req = req || {};
+    opts = opts || {};
+    var action = str(req.action);
+    var actor = str(req.actor).slice(0, 60) || 'landlord';
+    if (action.indexOf('admin.') === 0 && opts.requireAdminKey) {
+      if (!opts.adminKey) { var e1 = new Error('The admin key hasn\'t been set up on the server. Run setup() in Apps Script.'); e1.code = 'AUTH'; throw e1; }
+      if (!safeEqual(str(req.adminKey), opts.adminKey)) { var e2 = new Error('The admin key is wrong. Check it in Settings.'); e2.code = 'AUTH'; throw e2; }
+    }
+    switch (action) {
+      case 'ping': return { ok: true, version: VERSION };
+      case 'verify': return engine.verify(req.sha256);
+      case 'sign.open': return engine.open(req.token, req.client);
+      case 'sign.consent': return engine.consent(req.token, req.client);
+      case 'sign.sendCode': return engine.sendCode(req.token, req.client);
+      case 'sign.verifyCode': return engine.verifyCode(req.token, req.code, req.client);
+      case 'sign.reviewed': return engine.reviewed(req.token, req.info, req.client);
+      case 'sign.submit': return engine.submit(req.token, req.payload, req.client);
+      case 'sign.decline': return engine.decline(req.token, req.reason, req.client);
+      case 'sign.download': return engine.signerDownload(req.token);
+      case 'admin.list': return engine.list();
+      case 'admin.get': return engine.get(req.id);
+      case 'admin.preview': return engine.preview(req.input);
+      case 'admin.create': return engine.create(req.input, actor);
+      case 'admin.issueLink': return engine.issueLink(req.id, req.signerId, req.channel, actor);
+      case 'admin.cancel': return engine.cancel(req.id, req.reason, actor);
+      case 'admin.download': return engine.adminDownload(req.id);
+      default: var e3 = new Error('Unknown action: ' + action); e3.code = 'BAD_REQUEST'; throw e3;
+    }
+  }
+
+  return {
+    VERSION: VERSION,
+    DEFAULT_TEMPLATE: DEFAULT_TEMPLATE,
+    FIELD_DEFS: FIELD_DEFS,
+    sha256: sha256,
+    stable: stable,
+    hashOf: hashOf,
+    esc: esc,
+    normName: normName,
+    maskEmail: maskEmail,
+    roleLabel: roleLabel,
+    parseYmd: parseYmd,
+    addDays: addDays,
+    longDate: longDate,
+    ordinal: ordinal,
+    ageOn: ageOn,
+    money: money,
+    moneyNum: moneyNum,
+    validateCreate: validateCreate,
+    validateDetails: validateDetails,
+    buildFields: buildFields,
+    renderAgreement: renderAgreement,
+    renderFinalHtml: renderFinalHtml,
+    renderCertificate: renderCertificate,
+    describeEvent: describeEvent,
+    genesisHash: genesisHash,
+    hashEvent: hashEvent,
+    verifyChain: verifyChain,
+    createEngine: createEngine,
+    dispatch: dispatch
+  };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = ESign;

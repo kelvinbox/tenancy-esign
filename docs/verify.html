@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en-NZ">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<title>Check a signed tenancy agreement</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="hdr">
+  <div class="tile" style="width:38px;height:38px;flex-basis:38px;font-size:20px;background:rgba(255,255,255,.18)">&#128269;</div>
+  <div class="grow"><h1>Check a signed agreement</h1><div class="sub">Is this copy the one everyone signed?</div></div>
+  <a id="demoBadge" class="demo-badge" href="index.html" hidden>DEMO</a>
+</header>
+<main class="wrap">
+  <div class="card">
+    <p>Choose the signed agreement file. Its fingerprint (SHA-256) is worked out <b>on this device</b>; the file itself is never uploaded. We then look the fingerprint up in the signing records.</p>
+    <label class="drop" id="drop"><input type="file" id="file" hidden><div style="font-size:34px">&#128196;</div><b>Choose the signed file</b><div class="small muted">PDF (or the demo's .html file)</div></label>
+    <hr class="sep">
+    <label class="f"><span class="l">Or paste a fingerprint</span><input id="hash" class="mono" placeholder="64 letters and numbers" autocomplete="off"></label>
+    <button class="btn block" id="check">Check fingerprint</button>
+  </div>
+  <div id="result"></div>
+</main>
+<script src="js/config.js"></script>
+<script src="js/core.js"></script>
+<script src="js/agreement-template.js"></script>
+<script src="js/demo-backend.js"></script>
+<script src="js/api.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = UI.$, esc = UI.esc;
+  if (!ESignApi.live) $('#demoBadge').hidden = false;
+  ESignApi.warmUp();
+
+  function show(r, hash, fileName) {
+    var h;
+    if (r.found) {
+      h = '<div class="card"><div class="ok-box" style="font-size:16px"><b>&#9989; Match found.</b> ' + (fileName ? esc(fileName) + ' is' : 'This fingerprint belongs to') + ' an unaltered copy of a completed agreement.</div>' +
+        '<div class="doc"><table class="kv">' +
+        '<tr><th>Agreement</th><td>' + esc(r.title) + '<br><span class="small muted">' + esc(r.id) + '</span></td></tr>' +
+        '<tr><th>Completed</th><td>' + esc(r.completedAtText) + '</td></tr>' +
+        r.signers.map(function (s) { return '<tr><th>' + esc(s.roleLabel) + '</th><td>' + esc(s.name) + '<br><span class="small muted">signed ' + esc(s.signedAtText) + '</span></td></tr>'; }).join('') +
+        '<tr><th>Audit trail</th><td>' + (r.chainOk ? '&#10003; intact (' + r.events + ' events)' : '&#9888;&#65039; altered since signing') + '</td></tr>' +
+        '</table></div><p class="small muted">Fingerprint<br><span class="mono">' + esc(hash) + '</span></p></div>';
+    } else {
+      h = '<div class="card"><div class="err" style="font-size:16px"><b>&#10060; No match.</b> This file isn\'t an exact copy of any completed agreement in the records. ' +
+        'It may have been changed, re-saved or printed to a new PDF, or it may be from somewhere else.</div>' +
+        '<p class="small muted">Fingerprint checked<br><span class="mono">' + esc(hash) + '</span></p></div>';
+    }
+    $('#result').innerHTML = h;
+    $('#result').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function lookup(hash, fileName) {
+    var b = $('#check');
+    UI.busy(b, true, 'Checking...');
+    ESignApi.call('verify', { sha256: hash }).then(function (r) { UI.busy(b, false); show(r, hash, fileName); })
+      .catch(function (e) { UI.busy(b, false); UI.toast(e.message, 'error'); });
+  }
+
+  function hashFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var bytes = new Uint8Array(reader.result);
+      var done = function (hex) { $('#hash').value = hex; lookup(hex, file.name); };
+      if (window.crypto && crypto.subtle) {
+        crypto.subtle.digest('SHA-256', bytes).then(function (buf) {
+          done(Array.prototype.map.call(new Uint8Array(buf), function (x) { return ('0' + x.toString(16)).slice(-2); }).join(''));
+        });
+      } else done(ESign.sha256(bytes));
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  $('#file').addEventListener('change', function () { if (this.files[0]) hashFile(this.files[0]); });
+  var drop = $('#drop');
+  ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+  ['dragleave', 'drop'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
+  drop.addEventListener('drop', function (e) { if (e.dataTransfer.files[0]) hashFile(e.dataTransfer.files[0]); });
+  $('#check').addEventListener('click', function () {
+    var v = $('#hash').value.trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(v)) { UI.toast('A fingerprint is 64 letters (a-f) and numbers.', 'error'); return; }
+    lookup(v);
+  });
+})();
+</script>
+</body>
+</html>

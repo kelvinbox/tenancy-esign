@@ -1,0 +1,166 @@
+/*
+ * Agreement templates.
+ *
+ * A template is plain data: sections made of blocks. {{Field}} placeholders use the same
+ * data keys as the DocHub template (LandlordName, RentPerWeek, TenancyStart...), so the
+ * Tenant Management app can map to it directly. A copy of the template is frozen into each
+ * agreement when it is sent, and its SHA-256 is part of the locked terms fingerprint, so
+ * editing this file never changes an agreement that is already out for signing.
+ *
+ * Block types: p (paragraph), h (sub-heading), kv (label/value rows), list (numbered),
+ * landlord, tenants, signatures. Any block, kv row (3rd element) or list item can carry
+ * {when: 'Field'} or {unless: 'Field'}.
+ *
+ * IMPORTANT: this wording is a plain-English prototype written for testing. It has not been
+ * legally reviewed. Compare it with the Tenancy Services agreement template (tenancy.govt.nz)
+ * and get it checked before using it for a real tenancy.
+ *
+ * Pure ASCII: non-ASCII characters are written as \u escapes.
+ */
+var ESignTemplates = (function () {
+  'use strict';
+  var T = {};
+
+  T['nz-residential-v1'] = {
+    id: 'nz-residential-v1',
+    version: '1.0.0',
+    title: 'Residential Tenancy Agreement',
+    subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
+    intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
+      '(the Act) applies to it. If a term of this agreement is inconsistent with the Act, the Act applies instead. ' +
+      'Free information about the rights and obligations of tenants and landlords is at tenancy.govt.nz or on 0800 836 262.',
+    sections: [
+      {
+        id: 'parties',
+        heading: '1. The parties',
+        blocks: [{ type: 'landlord' }, { type: 'tenants' }]
+      },
+      {
+        id: 'premises',
+        heading: '2. The premises and the tenancy',
+        blocks: [
+          {
+            type: 'kv', rows: [
+              ['Address of the premises', '{{PropertyAddress}}'],
+              ['Type of tenancy', '{{TenancyTypeText}}'],
+              ['Start date', '{{TenancyStart}}'],
+              ['End date', '{{TenancyEnd}}', { when: 'IsFixedTerm' }],
+              ['Maximum number of occupants', '{{MaximumOccupants}}'],
+              ['Chattels provided by the landlord', '{{Chattels}}']
+            ]
+          },
+          { type: 'p', when: 'IsFixedTerm', text: 'This is a fixed-term tenancy. When the fixed term ends it becomes a periodic tenancy, unless the parties agree otherwise or notice is given as the Act allows.' },
+          { type: 'p', when: 'IsPeriodic', text: 'This is a periodic tenancy. It continues until it is ended by notice given as the Act allows.' },
+          { type: 'p', text: 'No more than {{MaximumOccupants}} people may live at the premises at any time.' }
+        ]
+      },
+      {
+        id: 'rent',
+        heading: '3. Rent and bond',
+        blocks: [
+          {
+            type: 'kv', rows: [
+              ['Rent', '${{RentPerWeek}} per week'],
+              ['When rent is paid', 'Weekly in advance. The first payment is due on {{TenancyStart}}.'],
+              ['How rent is paid', '{{RentPaymentDetails}}'],
+              ['Bond', '${{BondAmount}}']
+            ]
+          },
+          {
+            type: 'list', items: [
+              'The landlord must not require rent to be paid more than 2 weeks in advance.',
+              'The bond is not more than 4 weeks\' rent. The landlord will give a receipt for every bond payment and will lodge the bond with Tenancy Services within 23 working days of receiving it.',
+              'The rent can be increased only as the Act allows: no more than once every 12 months, and with at least 60 days\' written notice.',
+              'The landlord will give a receipt for any rent paid in cash.'
+            ]
+          }
+        ]
+      },
+      {
+        id: 'statements',
+        heading: '4. Statements the law requires',
+        blocks: [
+          { type: 'h', text: 'Insurance' },
+          { type: 'p', when: 'IsInsured', text: 'The premises are insured with {{Insurer}} (policy {{InsurancePolicy}}). The excess is ${{ExcessAmount}}. The tenant can ask the landlord for a copy of the insurance policy.' },
+          { type: 'p', unless: 'IsInsured', text: 'The premises are not insured.' },
+          { type: 'p', text: 'If the tenant, or someone they allow on the premises, carelessly damages the premises, the tenant may be liable for the cost of the damage up to 4 weeks\' rent, or up to the insurance excess if that is lower. Different rules apply to intentional damage and damage caused by a criminal act.' },
+          { type: 'h', text: 'Insulation' },
+          { type: 'p', text: '{{InsulationStatement}}' },
+          { type: 'p', when: 'HasInsulationDate', text: 'The insulation was last inspected on {{InsulationInspectionDate}}.' },
+          { type: 'h', text: 'Healthy homes standards' },
+          { type: 'p', text: '{{HealthyHomesStatement}}' },
+          { type: 'h', text: 'Smoke alarms' },
+          { type: 'p', text: 'The landlord has installed working smoke alarms as the law requires. The tenant must not damage, disconnect or remove a smoke alarm, must replace the batteries in any alarm that uses replaceable batteries, and must tell the landlord promptly if an alarm is not working.' }
+        ]
+      },
+      {
+        id: 'landlord-obligations',
+        heading: '5. The landlord agrees to',
+        blocks: [{
+          type: 'list', items: [
+            'provide the premises in a reasonably clean and reasonable state of repair, with locks that make them reasonably secure',
+            'maintain the premises in a reasonable state of repair, having regard to their age and character, and comply with building, health and safety laws that apply to them',
+            'let the tenant have quiet enjoyment of the premises',
+            'give at least 48 hours\' notice before an inspection (no more than one inspection every 4 weeks), and at least 24 hours\' notice before entering to do repairs or maintenance, entering only between 8am and 7pm',
+            'not unreasonably refuse a request from the tenant to make a minor change to the premises',
+            'tell the tenant in writing of any change to the landlord\'s name, contact details or address for service'
+          ]
+        }]
+      },
+      {
+        id: 'tenant-obligations',
+        heading: '6. The tenant agrees to',
+        blocks: [{
+          type: 'list', items: [
+            'pay the rent on time',
+            'keep the premises reasonably clean and tidy, and remove rubbish as required',
+            'tell the landlord as soon as possible about any damage or anything that needs repair',
+            'not intentionally or carelessly damage the premises, or let anyone else do so',
+            'not use the premises for any unlawful purpose',
+            'not disturb the neighbours\' peace, comfort or privacy',
+            'not make changes to the premises without the landlord\'s written consent (consent to a minor change must not be unreasonably refused)',
+            'not let more than the maximum number of occupants live at the premises',
+            'at the end of the tenancy, leave the premises reasonably clean and tidy, remove all their belongings and rubbish, and return all keys and remotes'
+          ]
+        }]
+      },
+      {
+        id: 'ending',
+        heading: '7. Ending the tenancy',
+        blocks: [
+          { type: 'p', text: 'The tenancy can only be ended as the Act allows. For example, a tenant in a periodic tenancy can end it by giving at least 28 days\' written notice. The landlord can give notice only on the grounds, and with the notice periods, set out in the Act.' }
+        ]
+      },
+      {
+        id: 'other-terms',
+        heading: '8. Other terms',
+        blocks: [
+          {
+            type: 'list', items: [
+              'Smoking is not allowed inside the premises.',
+              'Pets: {{PetsText}}',
+              { text: '{{AdditionalTerms}}', when: 'HasAdditionalTerms' }
+            ]
+          },
+          { type: 'p', text: 'Any term in this section that is inconsistent with the Act has no effect.' }
+        ]
+      },
+      {
+        id: 'electronic',
+        heading: '9. Signing electronically',
+        blocks: [
+          { type: 'p', text: 'The parties agree that this agreement may be signed electronically, one party after another in the order shown below, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The agreement is complete when every party has signed. Each party will receive a copy of the signed agreement with a signing certificate that records how and when each person signed.' }
+        ]
+      },
+      {
+        id: 'signatures',
+        heading: '10. Signatures',
+        blocks: [{ type: 'signatures' }]
+      }
+    ]
+  };
+
+  return T;
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = ESignTemplates;
