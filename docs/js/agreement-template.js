@@ -8,7 +8,8 @@
  * editing this file never changes an agreement that is already out for signing.
  *
  * Block types: p (paragraph), h (sub-heading), kv (label/value rows), list (numbered),
- * landlord, tenants, signatures, declaration (the landlord's signed declaration). A list item {each: 'Field'} becomes one numbered item per line of that field.
+ * landlord, tenants, signatures, declaration (the landlord's signed declaration),
+ * statement ({field}: a "Label: details" statement such as insulation, shown as a table with key words in bold). A list item {each: 'Field'} becomes one numbered item per line of that field.
  * Any block, kv row (3rd element) or list item can carry
  * {when: 'Field'} or {unless: 'Field'}.
  *
@@ -24,7 +25,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.5.0',
+    version: '1.6.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -94,10 +95,10 @@ var ESignTemplates = (function () {
           { type: 'p', unless: 'IsInsured', text: 'The premises are not insured.' },
           { type: 'p', text: 'If the tenant, or someone they allow on the premises, carelessly damages the premises, the tenant is liable for the cost of the damage up to 4 weeks\' rent or the insurance excess (if any), whichever is lower. The tenant is liable for the full cost of damage that they or their guests cause intentionally, or that results from an act or omission that is an imprisonable offence.' },
           { type: 'h', text: 'Insulation' },
-          { type: 'p', text: '{{InsulationStatement}}' },
+          { type: 'statement', field: 'InsulationStatement' },
           { type: 'p', when: 'HasInsulationDate', text: 'The insulation was last inspected on {{InsulationInspectionDate}}.' },
           { type: 'h', text: 'Healthy homes standards' },
-          { type: 'p', text: '{{HealthyHomesStatement}}' },
+          { type: 'statement', field: 'HealthyHomesStatement' },
           { type: 'h', text: 'Landlord declaration' },
           { type: 'declaration' },
           { type: 'h', text: 'Smoke alarms' },

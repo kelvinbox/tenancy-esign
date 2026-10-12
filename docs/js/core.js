@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.5.1';
+  var VERSION = '0.6.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -746,6 +746,30 @@ var ESign = (function () {
       '<td style="vertical-align:middle;font-size:17px;font-weight:bold;color:' + b.colour + '">' + esc(b.displayName) + '</td></tr></table></div>';
   }
 
+  /**
+   * A statement written as "Label: details" lines (insulation, healthy homes): a label/value table. Inside the details,
+   * sub-headings ("Kitchen:", "Reason:") start their own line in bold, and key facts (R-values, kW, "No insulation",
+   * "not stated") are bold. A line without a short label (e.g. the compliance date) stays a paragraph with its answer in bold.
+   */
+  function renderStatement(text, mode) {
+    var wrap = function (h) { return mode === 'view' ? '<span class="fv">' + (h || '&mdash;') + '</span>' : (h || '&mdash;'); };
+    var rows = '', paras = '';
+    String(text || '').split(/\r?\n/).map(str).filter(Boolean).forEach(function (line) {
+      var m = /^([A-Z][A-Za-z ,\/-]{1,30}):\s+(.+)$/.exec(line);
+      if (m) { rows += kvRow(m[1], wrap(statementDetail(m[2]))); return; }
+      var k = line.lastIndexOf(': ');
+      paras += '<p>' + (k > 0 ? esc(line.slice(0, k + 1)) + ' <b>' + wrap(esc(line.slice(k + 2))) + '</b>' : wrap(statementDetail(line))) + '</p>';
+    });
+    return (rows ? '<table class="kv st">' + rows + '</table>' : '') + paras;
+  }
+  function statementDetail(s) {
+    return esc(s)
+      .replace(/(^|\.\s+)([A-Z][A-Za-z \-]{2,60}):\s/g, function (_, pre, label) { return (pre ? '.<br>' : '') + '<b>' + label + ':</b> '; })
+      .replace(/\b(R\d+(?:\.\d+)?|\d+(?:\.\d+)? kW)\b/g, '<b>$1</b>')
+      .replace(/\b(No insulation|Partly insulated|Not known|Not stated|not stated|not in reasonable condition|does not apply|do not efficiently drain|no extractor fan)\b/g, '<b>$1</b>')
+      .replace(/\.\s+(?=[A-Z])/g, '.<br>');   // one sentence per line
+  }
+
   /** Signature blocks two to a row in the PDF and previews; stacked on the signing page (phones). */
   function sigGrid(blocks, mode) {
     if (mode === 'view' || blocks.length < 2) return '<div class="sigs">' + blocks.join('') + '</div>';
@@ -791,6 +815,7 @@ var ESign = (function () {
     switch (b.type) {
       case 'p': return '<p>' + fillText(b.text, f, mode) + '</p>';
       case 'h': return '<h4>' + esc(b.text) + '</h4>';
+      case 'statement': return renderStatement(f[b.field], mode);
       case 'kv':
         return '<table class="kv">' + b.rows.filter(function (r) { return cond(r[2], f); }).map(function (r) {
           return kvRow(r[0], fillText(r[1], f, mode));
@@ -990,7 +1015,7 @@ var ESign = (function () {
     'td.cn{width:30px;font-weight:700;color:#333;white-space:nowrap}' +
     'table.kd{margin:8px 0 12px;border:1.5px solid #333;page-break-inside:avoid}table.kd td{border:1px solid #bbb;padding:5px 8px;vertical-align:top;width:33%}' +
     '.kd-l{font-size:7.5pt;text-transform:uppercase;letter-spacing:.6px;color:#555}.kd-v{font-weight:700;margin-top:1px}' +
-    'table.sg td.sgc{width:50%;vertical-align:top;padding:0 4px;border:0}' +
+    'table.sg td.sgc{width:50%;vertical-align:top;padding:0 4px;border:0}table.st{margin:4px 0 8px}table.st th{width:24%}' +
     '.sigs{margin-top:6px}.sig{border:1px solid #bbb;padding:8px;margin:0 0 8px;page-break-inside:avoid}' +
     '.sig-role{font-size:9pt;color:#555}.sig-name{font-weight:700}.sig-box{height:70px;margin:4px 0;border-bottom:1px solid #333}' +
     '.sig-box img{height:68px;max-width:100%}.sig-meta{font-size:8.5pt;color:#444}' +

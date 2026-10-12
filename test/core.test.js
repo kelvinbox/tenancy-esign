@@ -489,3 +489,19 @@ test('0.5.1 branding: a blank display name shows no name at the top (initials st
     assert.ok(head.indexOf('Example Family Trust') < 0, style + ': no name in the letterhead');
   }
 });
+
+test('template 1.6.0: insulation and healthy homes statements are label/value tables with bold key facts', () => {
+  const b = memoryBackend();
+  const terms = Object.assign({}, sampleInput().terms, {
+    insulationStatement: 'Ceiling: Glass wool, R2.9, in reasonable condition.\nWalls: Not known. Not possible to check.',
+    healthyHomesStatement: 'Ventilation: All habitable spaces meet the ventilation standard. Kitchen: extractor fan. Bathroom: no extractor fan.\nThe healthy homes compliance date for this tenancy is: 1 July 2025.'
+  });
+  const html = b.call({ action: 'admin.preview', input: sampleInput({ terms }) }).html;
+  assert.ok(/<table class="kv st"><tr><th>Ceiling<\/th><td>Glass wool, <b>R2\.9<\/b>, in reasonable condition\.<\/td><\/tr>/.test(html));
+  assert.ok(html.indexOf('<b>Not known</b>.<br>Not possible to check.') > 0, 'one sentence per line');
+  assert.ok(html.indexOf('standard.<br><b>Kitchen:</b> extractor fan.<br><b>Bathroom:</b> <b>no extractor fan</b>.') > 0, 'sub-headings on their own lines');
+  assert.ok(html.indexOf('<p>The healthy homes compliance date for this tenancy is: <b>1 July 2025.</b></p>') > 0);
+  // free text without labels still renders
+  const plain = b.call({ action: 'admin.preview', input: sampleInput() }).html;
+  assert.ok(plain.indexOf('<p>Ceiling: 190mm') > 0 || plain.indexOf('<th>Ceiling</th>') > 0);
+});

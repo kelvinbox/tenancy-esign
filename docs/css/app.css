@@ -161,6 +161,7 @@ input[readonly] { background: #f1f5f9; color: var(--ink-2); }
 .doc table.kv { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0; }
 .doc table.kv th { text-align: left; font-weight: 600; color: var(--ink-2); padding: 7px 8px 7px 0; vertical-align: top; width: 40%; border-bottom: 1px solid var(--line); }
 .doc table.kv td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-word; }
+.doc table.st th { width: 30%; }
 .doc table.cl { border-collapse: collapse; margin: 6px 0; }
 .doc table.cl td { vertical-align: top; padding: 5px 0; }
 .doc td.cn { width: 38px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
