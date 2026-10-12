@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.6.0';
+  var VERSION = '0.6.1';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -700,7 +700,8 @@ var ESign = (function () {
   }
   /** The logo, or an initials badge in the landlord's colour (round for Classic, rounded square for Modern). */
   function brandMark(b, name, size, src) {
-    if (b.logo) return '<img src="' + esc(src || b.logo) + '" alt="' + esc(name) + '" style="max-height:' + size + 'px;max-width:' + (size * 4) + 'px;vertical-align:middle">';
+    // a logo shows larger than the initials badge (logos are usually wide and need the height to read)
+    if (b.logo) return '<img src="' + esc(src || b.logo) + '" alt="' + esc(name) + '" style="max-height:' + Math.round(size * 1.6) + 'px;max-width:' + Math.round(size * 6) + 'px;vertical-align:middle">';
     return '<table style="border-collapse:collapse;width:auto;margin:0 auto"><tr><td style="width:' + size + 'px;height:' + size + 'px;padding:0;border:0;background:' + b.colour +
       ';color:' + onColour(b.colour) + ';text-align:center;vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:' + Math.round(size * 0.4) +
       'px;letter-spacing:1px;border-radius:' + (b.style === 'modern' ? Math.round(size / 5) + 'px' : '50%') + '">' + esc(brandInitials(name)) + '</td></tr></table>';
