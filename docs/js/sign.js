@@ -1,5 +1,5 @@
 /*
- * Signer page. Steps: 1 Start (consent) -> 2 Verify email -> 3 Read -> 4 Your details -> 5 Sign.
+ * Signer page. Steps: 1 Start (consent) -> 2 Verify email -> 3 Read -> 4 Your details -> 5 Share location -> 6 Sign.
  * Every step is recorded by the server in the audit trail.
  */
 (function () {
@@ -9,8 +9,8 @@
   var view = null, step = 'start', pad = null, readStart = 0, details = {};
   var submissionId = 'sub-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   var app = $('#app'), bar = $('#bar'), barInner = $('#barInner');
-  var STEPS = ['start', 'verify', 'read', 'details', 'sign'];
-  var STEP_LABEL = { start: 'Step 1 of 5: Before you start', verify: 'Step 2 of 5: Check it\'s you', read: 'Step 3 of 5: Read the agreement', details: 'Step 4 of 5: Your details', sign: 'Step 5 of 5: Sign' };
+  var STEPS = ['start', 'verify', 'read', 'details', 'locate', 'sign'];
+  var STEP_LABEL = { start: 'Step 1 of 6: Before you start', verify: 'Step 2 of 6: Check it\'s you', read: 'Step 3 of 6: Read the agreement', details: 'Step 4 of 6: Your details', locate: 'Step 5 of 6: Where you\'re signing', sign: 'Step 6 of 6: Sign' };
 
   if (!ESignApi.live) $('#demoBadge').hidden = false;
   ESignApi.warmUp();
@@ -84,7 +84,7 @@
     if (view.waitingFor) {
       return renderClosed('&#9203;', 'It\'s not your turn yet', 'Everyone signs one after another. We\'re waiting for ' + view.waitingFor.name + ' (' + view.waitingFor.roleLabel + '). We\'ll email you when it\'s your turn.', true);
     }
-    ({ start: renderStart, verify: renderVerify, read: renderRead, details: renderDetails, sign: renderSign })[step]();
+    ({ start: renderStart, verify: renderVerify, read: renderRead, details: renderDetails, locate: renderLocate, sign: renderSign })[step]();
   }
 
   function signersList() {
@@ -110,7 +110,7 @@
         (view.me.kind === 'incoming' ? ' You\'ll read the signed tenancy agreement you are joining before you sign. You won\'t be re-signing it: you sign a short variation that adds you to it.' :
           ' The rest of the agreement stays the same.') + '</div>' : '') +
       '<p class="muted small">It takes about 5 minutes. You\'ll check it\'s you with a code sent to your email, read the ' +
-      (view.agreement.kind === 'variation' ? 'change' : 'agreement') + ', confirm your details, then sign with your finger.</p></div>' +
+      (view.agreement.kind === 'variation' ? 'change' : 'agreement') + ', confirm your details, share your location (your phone will ask), then sign with your finger.</p></div>' +
       '<div class="card"><h2>Signing order</h2><p class="small muted">Everyone signs one after another. The landlord signs last.</p>' + signersList() + '</div>' +
       '<div class="card"><h2>Signing electronically</h2>' +
       '<label class="check" id="consentBox"><input type="checkbox" id="consent"><span>' + esc(view.consentText) + '</span></label>' +
@@ -308,7 +308,94 @@
         window.scrollTo(0, 0);
         return;
       }
-      step = 'sign'; render();
+      step = 'locate'; render();
+    });
+  }
+
+  /* ---------- location: shared just before signing, recorded in the audit trail ---------- */
+
+  /** What the signer is using, for instructions that match their screen. */
+  function device() {
+    var ua = navigator.userAgent || '', ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    var android = /Android/.test(ua);
+    var inApp = /FBAN|FBAV|Instagram|Line\/|GSA\/|LinkedInApp|Snapchat|Twitter/.test(ua);
+    var browser = /CriOS/.test(ua) ? 'Chrome' : /FxiOS/.test(ua) ? 'Firefox' : /EdgiOS|EdgA|Edg\//.test(ua) ? 'Edge' : /SamsungBrowser/.test(ua) ? 'Samsung Internet' :
+      /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'your browser';
+    return { ios: ios, android: android, inApp: inApp, browser: browser, mac: !ios && /Macintosh/.test(ua), windows: /Windows/.test(ua),
+      name: ios ? (/iPad/.test(ua) ? 'iPad' : 'iPhone') : android ? 'Android phone' : /Macintosh/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows computer' : 'device' };
+  }
+
+  /** What they'll see when the browser asks. */
+  function promptHint(d) {
+    if (d.inApp) return 'It looks like this link opened inside another app, which usually can\'t share a location. Tap the <b>&middot;&middot;&middot;</b> or share button and choose <b>Open in ' + (d.ios ? 'Safari' : 'Chrome') + '</b> (or your browser) first.';
+    if (d.ios) return 'A box will pop up asking to use your current location. Tap <b>Allow</b> (or <b>Allow While Using App</b>).';
+    if (d.android) return 'A box will pop up asking to use your device\'s location. Tap <b>Allow</b> (or <b>While using the site</b>).';
+    return 'Your browser will ask to know your location, usually near the address bar. Choose <b>Allow</b>.';
+  }
+
+  /** Step-by-step fixes for the reason it failed, for this device and browser. */
+  function fixSteps(d, code) {
+    var b = d.browser, steps = [];
+    if (code === 'unsupported') return ['This browser can\'t share a location. Open your signing link on your phone instead (in Safari on an iPhone, or Chrome on Android).'];
+    if (code === 3) return ['Your device took too long to find where you are. Turn on Wi-Fi (it helps even if you\'re not connected), move near a window, then tap <b>Try again</b>.'];
+    if (d.ios && d.inApp) return ['You opened the link inside another app, which can\'t share your location.', 'Tap the <b>&middot;&middot;&middot;</b> or share button and choose <b>Open in Safari</b> (or copy the link into Safari), then carry on there.'];
+    if (d.ios) {
+      steps.push('Open the <b>Settings</b> app.', 'Tap <b>Privacy &amp; Security</b>, then <b>Location Services</b>, and make sure <b>Location Services</b> is on.');
+      if (b === 'Safari') steps.push('Scroll down, tap <b>Safari Websites</b>, and choose <b>While Using the App</b> (or <b>Ask Next Time</b>).',
+        'If you tapped <b>Don\'t Allow</b> before: back in Safari, tap the <b>aA</b> (or page menu) button in the address bar, then <b>Website Settings</b>, and set <b>Location</b> to <b>Allow</b> or <b>Ask</b>.');
+      else steps.push('Scroll down, tap <b>' + b + '</b>, and choose <b>While Using the App</b> (or <b>Ask Next Time</b>).');
+      steps.push('Come back to this page and tap <b>Try again</b>. If it still doesn\'t ask, reload the page.');
+      return steps;
+    }
+    if (d.android) {
+      if (code === 2) steps.push('Swipe down from the top of the screen and turn on <b>Location</b>.');
+      if (b === 'Samsung Internet') steps.push('Tap the icon to the left of the web address (a padlock or sliders), then <b>Permissions</b>, and allow <b>Location</b>.',
+        'If that isn\'t there: open <b>Settings</b> &gt; <b>Apps</b> &gt; <b>Samsung Internet</b> &gt; <b>Permissions</b> &gt; <b>Location</b> &gt; <b>Allow only while using the app</b>.');
+      else steps.push('Tap the icon to the left of the web address (a padlock or sliders), then <b>Permissions</b> (or <b>Site settings</b>), and set <b>Location</b> to <b>Allow</b>.',
+        'If ' + b + ' itself isn\'t allowed: open <b>Settings</b> &gt; <b>Apps</b> &gt; <b>' + b + '</b> &gt; <b>Permissions</b> &gt; <b>Location</b> &gt; <b>Allow only while using the app</b>.');
+      steps.push('Come back and tap <b>Try again</b>.');
+      return steps;
+    }
+    if (b === 'Safari' && d.mac) steps.push('In the menu bar choose <b>Safari</b> &gt; <b>Settings</b> &gt; <b>Websites</b> &gt; <b>Location</b>, and set this site to <b>Allow</b>.');
+    else if (b === 'Firefox') steps.push('Click the icon to the left of the web address, and remove the <b>Blocked</b> location permission (or set it to <b>Allow</b>).');
+    else steps.push('Click the icon to the left of the web address (a padlock or sliders), then <b>Site settings</b> or <b>Permissions</b>, and set <b>Location</b> to <b>Allow</b>.');
+    if (d.mac) steps.push('Also check <b>System Settings</b> &gt; <b>Privacy &amp; Security</b> &gt; <b>Location Services</b> is on, and turned on for ' + b + '.');
+    if (d.windows) steps.push('Also check Windows <b>Settings</b> &gt; <b>Privacy &amp; security</b> &gt; <b>Location</b>: <b>Location services</b> and <b>Let apps access your location</b> are on.');
+    steps.push('Reload this page and tap <b>Try again</b>. Easier still: open your signing link on your phone.');
+    return steps;
+  }
+
+  function renderLocate() {
+    var d = device(), have = view.me.location;
+    app.innerHTML = stepsHtml() +
+      '<div class="card"><h2>&#128205; Where you\'re signing</h2>' +
+      '<p>As part of signing, we record the location of the device you sign on. It goes in the agreement\'s audit trail and signing certificate, alongside the time and device, as evidence of where it was signed. It isn\'t shown in the agreement itself.</p>' +
+      (have ? '<div class="info"><b>&#10003; Location shared.</b> ' + esc(Number(have.lat).toFixed(5) + ', ' + Number(have.lng).toFixed(5)) +
+          (have.accuracy !== null && have.accuracy !== undefined ? ' (within ' + esc(have.accuracy) + ' m)' : '') + '</div>'
+        : '<div class="info"><b>Heads up:</b> when you tap <b>Share my location</b>, your ' + esc(d.name) + ' will ask for permission. ' + promptHint(d) + '</div>') +
+      '<div id="locHelp"></div></div>';
+    setBar('<button class="btn ghost" id="back">Back</button>' + (have ? '<button class="btn grow" id="go">Continue</button>' : '<button class="btn grow" id="share">&#128205; Share my location</button>'));
+    $('#back').addEventListener('click', function () { step = 'details'; render(); });
+    if (have) { $('#go').addEventListener('click', function () { step = 'sign'; render(); }); return; }
+    var btn = $('#share');
+    function failed(code, message) {
+      UI.busy(btn, false);
+      btn.innerHTML = '&#128205; Try again';
+      ESignApi.signerCall('sign.location', { token: token, location: { error: { code: code, message: message || '' } } }).catch(function () { /* recorded when possible */ });
+      var title = code === 1 ? 'Location access is turned off for this page' : code === 2 ? 'Your device couldn\'t work out where you are' : code === 3 ? 'Finding your location took too long' : 'Location isn\'t available here';
+      $('#locHelp').innerHTML = '<div class="err" style="margin-top:12px"><b>' + esc(title) + '.</b> You\'ll need to share it to sign. Here\'s how on your ' + esc(d.name) +
+        (d.browser !== 'your browser' ? ' (' + esc(d.browser) + ')' : '') + ':</div><ol class="small" style="padding-left:20px;line-height:1.5">' +
+        fixSteps(d, code).map(function (s) { return '<li>' + s + '</li>'; }).join('') + '</ol>' +
+        '<p class="small muted">Stuck? Contact ' + esc(view.ownerName) + ' and they can help.</p>';
+    }
+    btn.addEventListener('click', function () {
+      if (!navigator.geolocation) return failed('unsupported');
+      UI.busy(btn, true, 'Waiting for your device...');
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        ESignApi.signerCall('sign.location', { token: token, location: { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, at: new Date(pos.timestamp || Date.now()).toISOString() } })
+          .then(function (v) { view = v; UI.toast('Location shared.', 'ok'); step = 'sign'; render(); })
+          .catch(function (e) { showError(e, btn); });
+      }, function (err) { failed(err && err.code, err && err.message); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
     });
   }
 

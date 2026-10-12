@@ -85,6 +85,7 @@ function signAs(b, token, over) {
   const codeMail = b.db.outbox.filter(m => m.kind === 'code').slice(-1)[0];
   b.call({ action: 'sign.verifyCode', token, code: codeMail.code, client });
   b.call({ action: 'sign.reviewed', token, info: { termsHash: view.termsHash, secondsOnPage: 42 }, client });
+  if (over.location !== false) b.call({ action: 'sign.location', token, client, location: over.location || { lat: -45.87412, lng: 170.50351, accuracy: 12, at: '2026-10-13T09:00:00Z' } });
   const details = Object.assign({}, view.me.details, { addressForService: '14 Kowhai Lane, Roslyn, Dunedin' }, over.details || {});
   return b.call({
     action: 'sign.submit', token, client,

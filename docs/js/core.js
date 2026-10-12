@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.9.0';
+  var VERSION = '0.10.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -974,6 +974,8 @@ var ESign = (function () {
     CODE_FAILED: 'Wrong one-time code entered',
     IDENTITY_VERIFIED: 'Email address verified with one-time code',
     DOCUMENT_REVIEWED: 'Read the agreement to the end',
+    LOCATION_CAPTURED: 'Device location shared for signing',
+    LOCATION_FAILED: 'Device location not shared',
     SIGNED: 'Signed',
     DECLINED: 'Declined to sign',
     CANCELLED: 'Agreement cancelled',
@@ -997,9 +999,17 @@ var ESign = (function () {
     if (d.secondsOnPage) extra.push(d.secondsOnPage + 's on page');
     if (d.attemptsLeft !== undefined) extra.push(d.attemptsLeft + ' attempts left');
     if (d.variationId) extra.push(d.variationId + (d.version ? ', version ' + d.version : '') + (d.outcome ? ', ' + d.outcome.toLowerCase() : ''));
+    if (d.location) extra.push(locationText(d.location));
+    if (d.locationError) extra.push(d.locationError);
     if (d.sha256) extra.push('SHA-256 ' + d.sha256);
     if (d.attached && d.attached.length) extra.push('attached: ' + d.attached.map(function (a) { return a.name + ' (SHA-256 ' + a.sha256 + ')'; }).join(', '));
     return t + (extra.length ? ' (' + extra.join('; ') + ')' : '');
+  }
+
+  /** "-45.87412, 170.50351 (within 12 m)" */
+  function locationText(l) {
+    if (!l) return '';
+    return Number(l.lat).toFixed(5) + ', ' + Number(l.lng).toFixed(5) + (l.accuracy !== undefined && l.accuracy !== null ? ' (within ' + Math.round(l.accuracy) + ' m)' : '');
   }
 
   function clientText(c) {
@@ -1049,7 +1059,7 @@ var ESign = (function () {
       (env.parent ? kvRow('Changes', 'Version ' + esc(env.parent.version) + ' (' + esc(env.parent.id) + '), whose signed document has SHA-256 <span class="mono">' +
         esc(env.parent.finalSha256) + '</span>. This is version ' + esc(env.version) + ' of tenancy ' + esc(env.tenancyId) + '.') : '') +
       kvRow('Signing method', 'Personal link sent to each signer\'s email; email address verified with a one-time code before signing; ' +
-        'agreement to sign electronically recorded; agreement read to the end; drawn signature plus typed full name; signers signed in order, tenants first and the landlord\'s signer(s) last.') +
+        'agreement to sign electronically recorded; agreement read to the end; device location shared before signing; drawn signature plus typed full name; signers signed in order, tenants first and the landlord\'s signer(s) last.') +
       '</table>';
     h += '<h3>Fingerprints (SHA-256)</h3>';
     h += '<div class="fp"><b>Agreement terms</b> (locked when sent; every signer signed this exact version):<div class="mono">' + esc(env.termsHash) + '</div></div>';
@@ -1069,6 +1079,8 @@ var ESign = (function () {
         kvRow('Email verified (one-time code)', esc(fmt(s.verifiedAt))) +
         kvRow('Read to the end', esc(fmt(s.reviewedAt))) +
         kvRow('Signed', esc(fmt(s.signedAt))) +
+        (sig.location ? kvRow('Location when signing (reported by the device)', esc(locationText(sig.location)) +
+          '<br><span class="muted">https://maps.google.com/?q=' + esc(Number(sig.location.lat).toFixed(5) + ',' + Number(sig.location.lng).toFixed(5)) + '</span>') : '') +
         (sig.client ? kvRow('Device', esc(clientText(sig.client))) : '') +
         (sig.typedName ? kvRow('Typed name', esc(sig.typedName)) : '') +
         (sig.declaration ? kvRow('Declared (ticked separately)', esc(sig.declaration)) : '') +
@@ -1517,6 +1529,7 @@ var ESign = (function () {
           name: signerDetails(s).name, emailMasked: maskEmail(s.email),
           consentAt: s.consentAt || null, codeSentAt: s.otp ? s.otp.sentAt : null, verified: verified,
           verifiedAt: s.verifiedAt || null, reviewedAt: s.reviewedAt || null, signedAt: s.signedAt || null,
+          location: s.location ? clone(s.location) : null,
           details: clone(signerDetails(s))
         },
         isMyTurn: env.status === 'Sent' && !!cur && cur.id === s.id,
@@ -1922,6 +1935,32 @@ var ESign = (function () {
       return signerView(env, s);
     }
 
+    /**
+     * The signer's device location, shared just before signing ({lat, lng, accuracy, at}), or why it couldn't be
+     * ({error: {code, message}}). Every attempt goes in the audit trail; a shared location is needed to sign.
+     */
+    function location(token, p, client) {
+      p = p || {};
+      var f = bySignerToken(token), env = f.env, s = f.signer;
+      assertMyTurn(env, s);
+      if (!s.consentAt) fail('Please agree to sign electronically first.');
+      if (p.error) {
+        var why = { 1: 'permission denied', 2: 'position unavailable', 3: 'timed out', unsupported: 'not supported by this browser' }[p.error.code] || 'failed';
+        audit(env, 'LOCATION_FAILED', actorOf(s), { signer: s.role, locationError: why + (p.error.message ? ': ' + str(p.error.message).slice(0, 120) : '') }, client);
+        store.saveEnvelope(env);
+        return signerView(env, s);
+      }
+      var lat = Number(p.lat), lng = Number(p.lng), acc = Number(p.accuracy);
+      if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || (lat === 0 && lng === 0)) fail('The location from your device didn\'t look right. Please try again.');
+      s.location = {
+        lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, accuracy: isFinite(acc) && acc >= 0 ? Math.round(acc) : null,
+        deviceTime: str(p.at).slice(0, 40) || null, recordedAt: iso()
+      };
+      audit(env, 'LOCATION_CAPTURED', actorOf(s), { signer: s.role, location: clone(s.location) }, client);
+      store.saveEnvelope(env);
+      return signerView(env, s);
+    }
+
     function submit(token, p, client) {
       p = p || {};
       var f = bySignerToken(token), env = f.env, s = f.signer;
@@ -1935,6 +1974,7 @@ var ESign = (function () {
       }
       if (!s.reviewedAt) fail('Please read the agreement to the end first.');
       if (str(p.termsHash) !== env.termsHash) fail('The agreement has changed since you opened it. Please reload the page.', 'STALE');
+      if (!s.location) fail('Please share your location before signing.', 'LOCATION');
       if (p.agree !== true) fail('Please tick the box to confirm you agree.');
       var declaration = needsDeclaration(env, s) ? declarationText(env) : '';
       if (declaration && p.declare !== true) fail('Please tick the box to declare that the statements in section 4 are true and correct.');
@@ -1967,11 +2007,12 @@ var ESign = (function () {
         signedAt: signedAt,
         strokes: { count: Number(strokes.count) || 0, points: Number(strokes.points) || 0, ms: Number(strokes.ms) || 0 },
         statement: agreeTextFor(env, s),
+        location: clone(s.location),
         client: cleanClient(client)
       };
       var rec = {
         agreementId: env.id, role: s.role, email: s.email, termsHash: sig.termsHash, detailsHash: detailsHash,
-        imageSha256: sig.imageSha256, typedName: typed, signedAt: signedAt, statement: agreeTextFor(env, s)
+        imageSha256: sig.imageSha256, typedName: typed, signedAt: signedAt, statement: agreeTextFor(env, s), location: sig.location
       };
       if (declaration) { sig.declaration = declaration; rec.declaration = declaration; }
       sig.recordHash = hashOf(rec);
@@ -1984,7 +2025,7 @@ var ESign = (function () {
       audit(env, 'SIGNED', actorOf(s), {
         signer: s.role, name: details.name, typedName: typed, statement: agreeTextFor(env, s),
         termsHash: env.termsHash, detailsHash: detailsHash, signatureSha256: img.sha256, recordHash: sig.recordHash,
-        strokes: sig.strokes
+        strokes: sig.strokes, location: sig.location
       }, client);
 
       var next = currentSigner(env);
@@ -2189,6 +2230,7 @@ var ESign = (function () {
       },
       open: open,
       consent: consent,
+      location: location,
       sendCode: sendCode,
       verifyCode: verifyCode,
       reviewed: reviewed,
@@ -2226,6 +2268,7 @@ var ESign = (function () {
       case 'sign.reviewed': return engine.reviewed(req.token, req.info, req.client);
       case 'sign.submit': return engine.submit(req.token, req.payload, req.client);
       case 'sign.decline': return engine.decline(req.token, req.reason, req.client);
+      case 'sign.location': return engine.location(req.token, req.location, req.client);
       case 'sign.download': return engine.signerDownload(req.token);
       case 'sign.attachment': return engine.signerAttachment(req.token, req.id);
       case 'admin.list': return engine.list();

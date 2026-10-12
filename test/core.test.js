@@ -176,6 +176,7 @@ test('signing rules: order, wrong codes, stale terms, name match, re-verificatio
   const view = b.call({ action: 'sign.open', token: t1 });
   assert.throws(() => b.call({ action: 'sign.reviewed', token: t1, info: { termsHash: 'x' } }), /changed/);
   b.call({ action: 'sign.reviewed', token: t1, info: { termsHash: view.termsHash } });
+  b.call({ action: 'sign.location', token: t1, location: { lat: -45.87, lng: 170.5, accuracy: 20 } });
 
   const payload = {
     details: Object.assign({}, view.me.details, { addressForService: 'Somewhere' }), typedName: 'Someone Else', agree: true,
@@ -535,4 +536,35 @@ test('0.9.0: tenants confirm their date of birth when signing; "Under 18" follow
   const html = b.call({ action: 'admin.progress', id }).html;
   assert.ok(html.indexOf('2001-06-04') < 0 && html.indexOf('4th June 2001') < 0 && html.indexOf('4 June 2001') < 0, 'no date of birth on the agreement');
   assert.ok(/<th>Under 18<\/th><td>No<\/td>/.test(html));
+});
+
+test('0.10.0: signers share their device location before signing; every attempt is audited; it is in the signature record and certificate', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  const t1 = b.tokenFrom(b.lastEmail('mia@example.com', 'invite'));
+  const view = b.call({ action: 'sign.open', token: t1 });
+  assert.equal(view.me.location, null);
+  // a refusal is recorded, and signing is blocked until a location is shared
+  b.call({ action: 'sign.consent', token: t1 });
+  b.call({ action: 'sign.location', token: t1, location: { error: { code: 1, message: 'User denied Geolocation' } } });
+  const p = { details: Object.assign({}, view.me.details, { addressForService: 'x' }), typedName: 'Mia Example', agree: true, termsHash: view.termsHash, signaturePng: SIGNATURE, strokes: { count: 1 } };
+  b.call({ action: 'sign.sendCode', token: t1 });
+  b.call({ action: 'sign.verifyCode', token: t1, code: b.db.outbox.filter(m => m.kind === 'code').slice(-1)[0].code });
+  b.call({ action: 'sign.reviewed', token: t1, info: { termsHash: view.termsHash } });
+  assert.throws(() => b.call({ action: 'sign.submit', token: t1, payload: p }), /share your location/);
+  assert.throws(() => b.call({ action: 'sign.location', token: t1, location: { lat: 200, lng: 5 } }), /didn't look right/);
+  const v2 = b.call({ action: 'sign.location', token: t1, location: { lat: -45.874123456, lng: 170.503519, accuracy: 11.6, at: '2026-10-13T09:00:00Z' } });
+  assert.deepEqual([v2.me.location.lat, v2.me.location.lng, v2.me.location.accuracy], [-45.874123, 170.503519, 12]);
+  b.call({ action: 'sign.submit', token: t1, payload: p });
+  const s = b.db.envelopes[id].signers[0];
+  assert.equal(s.signature.location.lat, -45.874123, 'locked into the signature record');
+  const full = b.call({ action: 'admin.get', id });
+  const ev = full.events.map(e => e.type);
+  assert.ok(ev.indexOf('LOCATION_FAILED') >= 0 && ev.indexOf('LOCATION_CAPTURED') > ev.indexOf('LOCATION_FAILED') && ev.indexOf('SIGNED') > ev.indexOf('LOCATION_CAPTURED'));
+  assert.match(full.events.find(e => e.type === 'LOCATION_FAILED').text, /permission denied/);
+  assert.ok(full.events.find(e => e.type === 'LOCATION_CAPTURED').text.includes('-45.87412, 170.50352 (within 12 m)'));
+  assert.equal(full.chain.ok, true);
+  const cert = ESign.renderCertificate(b.db.envelopes[id], b.db.audit[id], {});
+  assert.ok(cert.includes('Location when signing (reported by the device)'));
+  assert.ok(cert.includes('maps.google.com/?q=-45.87412,170.50352'));
 });
