@@ -516,3 +516,23 @@ test('0.7.0: the signing page gets the landlord logo for its header (only when a
   b2.call({ action: 'admin.create', input: sampleInput({ branding: { style: 'modern' } }) });
   assert.equal(b2.call({ action: 'sign.open', token: b2.tokenFrom(b2.lastEmail('mia@example.com', 'invite')) }).brand, null);
 });
+
+test('0.9.0: tenants confirm their date of birth when signing; "Under 18" follows from it; the date stays off the agreement', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  const tok = b.tokenFrom(b.lastEmail('mia@example.com', 'invite'));
+  const v = b.call({ action: 'sign.open', token: tok });
+  assert.equal(v.me.details.dob, '2001-05-04', 'pre-filled from the application');
+  assert.ok(v.fields.some(f => f.key === 'dob' && f.required && f.type === 'date') && !v.fields.some(f => f.key === 'under18'));
+  // checks
+  assert.match(ESign.validateDetails('tenant', Object.assign({}, v.me.details, { addressForService: 'x', dob: '' }), v.me.details, '2026-10-12').errors.join(), /Date of birth is required/);
+  assert.match(ESign.validateDetails('tenant', Object.assign({}, v.me.details, { addressForService: 'x', dob: '2030-01-01' }), v.me.details, '2026-10-12').errors.join(), /check the date/);
+  assert.equal(ESign.validateDetails('tenant', Object.assign({}, v.me.details, { addressForService: 'x', dob: '2010-01-01' }), v.me.details, '2026-10-12').value.under18, 'Yes');
+  // a corrected date is kept, the agreement shows only Under 18
+  signAs(b, tok, { details: { dob: '2001-06-04' } });
+  const s = b.db.envelopes[id].signers.find(x => x.role === 'Tenant1');
+  assert.equal(s.details.dob, '2001-06-04'); assert.equal(s.details.under18, 'No');
+  const html = b.call({ action: 'admin.progress', id }).html;
+  assert.ok(html.indexOf('2001-06-04') < 0 && html.indexOf('4th June 2001') < 0 && html.indexOf('4 June 2001') < 0, 'no date of birth on the agreement');
+  assert.ok(/<th>Under 18<\/th><td>No<\/td>/.test(html));
+});

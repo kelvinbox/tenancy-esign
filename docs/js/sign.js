@@ -270,7 +270,7 @@
         f.options.map(function (o) { return '<label class="' + (o === v ? 'on' : '') + '"><input type="radio" name="' + id + '" value="' + esc(o) + '"' + (o === v ? ' checked' : '') + '>' + esc(o) + '</label>'; }).join('') +
         '</div>' + hint + '</div>';
     } else {
-      var auto = { name: 'name', mobile: 'tel', email: 'email' }[f.key] || 'off';
+      var auto = { name: 'name', mobile: 'tel', email: 'email', dob: 'bday' }[f.key] || 'off';
       input = '<input id="' + id + '" data-k="' + f.key + '" type="' + (f.type || 'text') + '" value="' + esc(v) + '" autocomplete="' + auto + '"' + (f.readonly ? ' readonly' : '') + '>';
     }
     return '<label class="f" for="' + id + '"><span class="l">' + esc(f.label) + (f.required || f.readonly ? '' : ' <span class="muted">(optional)</span>') + '</span>' + input + hint + '</label>';
@@ -314,7 +314,9 @@
 
   function renderSign() {
     var rows = view.fields.filter(function (f) { return f.key !== 'email'; }).map(function (f) {
-      return '<tr><th>' + esc(f.label) + '</th><td>' + esc(details[f.key] || '-') + '</td></tr>';
+      var v = details[f.key] || '';
+      if (f.type === 'date' && v) v = ESign.longDate(v);
+      return '<tr><th>' + esc(f.label) + '</th><td>' + esc(v || '-') + '</td></tr>';
     }).join('');
     app.innerHTML = stepsHtml() +
       '<div class="card doc"><h2>Your details</h2><table class="kv">' + rows + '</table><button class="btn link small" id="edit" type="button">Change</button></div>' +

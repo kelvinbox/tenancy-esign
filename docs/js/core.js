@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.8.0';
+  var VERSION = '0.9.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -480,7 +480,9 @@ var ESign = (function () {
         hint: 'Where legal notices can be delivered to you. Usually the rental address once you have moved in.' },
       { key: 'idType', label: 'ID type', required: true, type: 'select', options: ['Driver licence', 'Passport', 'Other photo ID'] },
       { key: 'idNumber', label: 'ID number', required: true },
-      { key: 'under18', label: 'Are you under 18?', required: true, type: 'radio', options: ['No', 'Yes'] }
+      // the date of birth is kept with the signed record; the agreement shows only "Under 18", worked out from it
+      { key: 'dob', label: 'Date of birth', required: true, type: 'date',
+        hint: 'Kept on file with the signed agreement. The agreement itself only shows whether you are under 18.' }
     ],
     landlord: [
       { key: 'name', label: 'Your full name', required: true, hint: 'The person signing for the landlord.' },
@@ -514,7 +516,7 @@ var ESign = (function () {
     });
   }
 
-  function validateDetails(kind, input, prefill) {
+  function validateDetails(kind, input, prefill, today) {
     input = input || {};
     var defs = FIELD_DEFS[kind], out = {}, errors = [];
     defs.forEach(function (d) {
@@ -525,6 +527,12 @@ var ESign = (function () {
       out[d.key] = val;
     });
     if (out.mobile && out.mobile.replace(/\D/g, '').length < 8) errors.push('Mobile: enter the full number.');
+    if (out.dob !== undefined) {   // tenants: a real date, not in the future; "Under 18" follows from it
+      if (!today) { var n = new Date(); today = n.getFullYear() + '-' + ('0' + (n.getMonth() + 1)).slice(-2) + '-' + ('0' + n.getDate()).slice(-2); }
+      var age = out.dob && parseYmd(out.dob) ? ageOn(out.dob, today) : null;
+      if (out.dob && (age === null || age < 0 || age > 120)) errors.push('Date of birth: check the date.');
+      out.under18 = age === null ? '' : (age < 18 ? 'Yes' : 'No');
+    }
     return { errors: errors, value: out };
   }
 
@@ -886,7 +894,7 @@ var ESign = (function () {
       var d = signerDetails(s);
       out.push({
         name: d.name, email: s.email, mobile: d.mobile, idType: d.idType, idNumber: d.idNumber, under18: d.under18,
-        addressForService: d.addressForService || '', ref: s.ref || null, dob: s.dob || null, pending: !s.details
+        addressForService: d.addressForService || '', ref: s.ref || null, dob: d.dob || s.dob || null, pending: !s.details
       });
     });
     return out;
@@ -899,7 +907,7 @@ var ESign = (function () {
       var d = signerDetails(s);
       return {
         name: d.name, email: s.email, mobile: d.mobile, idType: d.idType, idNumber: d.idNumber, under18: d.under18,
-        addressForService: d.addressForService || '', ref: s.ref || null, dob: s.dob || null
+        addressForService: d.addressForService || '', ref: s.ref || null, dob: d.dob || s.dob || null
       };
     });
   }
@@ -1627,7 +1635,7 @@ var ESign = (function () {
       v.tenants.forEach(function (tn, i) {
         env.signers.push({
           id: 'T' + (i + 1), role: 'Tenant' + (i + 1), kind: 'tenant', order: i + 1, email: tn.email, ref: tn.ref || null,
-          prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, under18: tn.under18, addressForService: '' },
+          prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, dob: tn.dob || '', under18: tn.under18, addressForService: '' },
           dob: tn.dob || null, status: 'Waiting'
         });
       });
@@ -1718,7 +1726,7 @@ var ESign = (function () {
       v.add.forEach(function (a, i) {
         env.signers.push({
           id: 'N' + (i + 1), role: 'NewTenant' + (i + 1), kind: 'incoming', order: ++n, email: a.email, ref: a.ref, dob: a.dob || null,
-          prefill: { name: a.name, email: a.email, mobile: a.mobile, idType: a.idType, idNumber: a.idNumber, under18: a.under18, addressForService: '' },
+          prefill: { name: a.name, email: a.email, mobile: a.mobile, idType: a.idType, idNumber: a.idNumber, dob: a.dob || '', under18: a.under18, addressForService: '' },
           status: 'Waiting'
         });
       });
@@ -1931,7 +1939,7 @@ var ESign = (function () {
       var declaration = needsDeclaration(env, s) ? declarationText(env) : '';
       if (declaration && p.declare !== true) fail('Please tick the box to declare that the statements in section 4 are true and correct.');
 
-      var dv = validateDetails(s.kind, p.details, signerDetails(s));
+      var dv = validateDetails(s.kind, p.details, signerDetails(s), svc.today());
       if (dv.errors.length) fail(dv.errors.join('\n'), 'INVALID');
       var details = dv.value;
       details.email = s.email;
@@ -2174,7 +2182,7 @@ var ESign = (function () {
           id: 'PREVIEW', template: tpl, propertyAddress: v.propertyAddress, landlord: v.landlord, terms: v.terms, branding: v.branding,
           signers: v.tenants.map(function (tn, i) {
             return { id: 'T' + (i + 1), role: 'Tenant' + (i + 1), kind: 'tenant', email: tn.email, status: 'Waiting',
-              prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, under18: tn.under18 } };
+              prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, dob: tn.dob || '', under18: tn.under18 } };
           }).concat(landlordSignerRecords(v))
         };
         return { errors: r.errors, warnings: r.warnings, html: renderPreviewHtml(env, fmt) };
