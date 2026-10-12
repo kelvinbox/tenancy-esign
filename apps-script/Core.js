@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.7.1';
+  var VERSION = '0.8.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -991,6 +991,7 @@ var ESign = (function () {
     if (d.attemptsLeft !== undefined) extra.push(d.attemptsLeft + ' attempts left');
     if (d.variationId) extra.push(d.variationId + (d.version ? ', version ' + d.version : '') + (d.outcome ? ', ' + d.outcome.toLowerCase() : ''));
     if (d.sha256) extra.push('SHA-256 ' + d.sha256);
+    if (d.attached && d.attached.length) extra.push('attached: ' + d.attached.map(function (a) { return a.name + ' (SHA-256 ' + a.sha256 + ')'; }).join(', '));
     return t + (extra.length ? ' (' + extra.join('; ') + ')' : '');
   }
 
@@ -1298,20 +1299,22 @@ var ESign = (function () {
         id: 'ref-intro', heading: 'The tenancy agreement you are joining (read only, not being re-signed)',
         html: '<p>Below are the signed documents that make up the tenancy agreement you are joining, exactly as everyone signed them. ' +
           'You are not re-signing them. When you sign this variation you agree to be bound by them, as amended by this variation, from the effective date. ' +
-          'You will be emailed copies of them.</p><table class="kv">' + (env.incorporates || []).map(function (d) {
+          'Copies of them were attached to the email with your signing link, and you will be sent them again with the signed variation.</p><table class="kv">' + (env.incorporates || []).map(function (d) {
             return kvRow('Version ' + d.version, esc(d.label) + '<br><span class="muted">' + esc(d.id) + ', signed ' + esc(fmt(d.completedAt)) + '</span>');
           }).join('') + '</table>'
       }];
+      // each signed document as it was signed (letterhead, title, key details, its own section headings); every section
+      // carries "ref" so the signing page can put the whole document in one bordered box under a bold header
       docs.forEach(function (d) {
-        var label = d.kind === 'variation' ? 'Variation v' + versionOf(d) : 'Original agreement';
+        var label = d.kind === 'variation' ? 'Signed variation (version ' + versionOf(d) + ')' : 'The original signed tenancy agreement';
         var a = renderAgreement(d, { mode: 'view', fmt: fmt });
-        out.push({
-          id: 'ref-' + versionOf(d), heading: label + ' (signed ' + fmt(d.completedAt) + '): ' + a.title,
-          html: '<p class="muted">' + esc(d.id) + ' &middot; SHA-256 <span class="mono">' + esc(d.final ? d.final.sha256 : '') + '</span></p><p>' + a.intro + '</p>'
-        });
+        var ref = { id: 'ref-' + versionOf(d), label: label, signed: 'Signed by everyone on ' + fmt(d.completedAt), docId: d.id, sha256: d.final ? d.final.sha256 : '' };
+        out.push({ id: 'ref-' + versionOf(d), heading: a.title, ref: ref,
+          html: (a.brand || '') + '<div class="doc-sub">' + esc(a.subtitle) + ' &middot; ' + esc(d.id) + '</div>' + (a.keyDetails || '') + '<p>' + a.intro + '</p>' });
         a.sections.forEach(function (sec) {
-          out.push({ id: 'ref-' + versionOf(d) + '-' + sec.id, heading: label + ': ' + sec.heading, html: sec.html });
+          out.push({ id: 'ref-' + versionOf(d) + '-' + sec.id, heading: sec.heading, html: sec.html, ref: ref });
         });
+        if (a.footer) out[out.length - 1].html += a.footer;
       });
       return out;
     }
@@ -1354,8 +1357,31 @@ var ESign = (function () {
         esc(env.propertyAddress) + '</b> to read and sign. It takes about 5 minutes and works on your phone.</p>' +
         button(link, 'Review and sign') +
         '<p style="color:#555;font-size:14px">This link is just for you, so please don\'t forward it. It expires on ' + esc(exp) + '.</p>' +
-        '<p>Thanks,<br>' + esc(senderName(env)) + '</p>');
-      return { to: s.email, subject: subject, text: text, html: html, kind: 'invite', link: link };
+        joiningNote(env, s, true) + '<p>Thanks,<br>' + esc(senderName(env)) + '</p>');
+      var m = { to: s.email, subject: subject, text: text.replace('\n\nThanks,', joiningNote(env, s, false) + '\n\nThanks,'), html: html, kind: 'invite', link: link };
+      var att = joiningAttachments(env, s);
+      if (att.length) { m.attachments = att.map(function (a) { return { ref: a.ref, name: a.name }; }); m.delivered = att.map(function (a) { return { name: a.name, sha256: a.sha256 }; }); }
+      return m;
+    }
+
+    /**
+     * A tenant joining a tenancy is sent the signed documents they're agreeing to be bound by (each version's signed PDF,
+     * plus any attachments such as body corporate rules) with their signing link, so they have them before they sign.
+     */
+    function joiningAttachments(env, s) {
+      if (env.kind !== 'variation' || s.kind !== 'incoming') return [];
+      var out = incorporatedEnvs(env).filter(function (d) { return d.final && d.final.ref; })
+        .map(function (d) { return { ref: d.final.ref, name: d.final.name, sha256: d.final.sha256 }; });
+      return out.concat(attachmentsFor(env).filter(function (a) { return a.ref; }).map(function (a) { return { ref: a.ref, name: a.name, sha256: a.sha256 }; }));
+    }
+    function joiningNote(env, s, html) {
+      var att = joiningAttachments(env, s);
+      if (!att.length) return '';
+      var t = 'Attached ' + (att.length > 1 ? 'are the signed documents' : 'is the signed document') + ' that make' + (att.length > 1 ? '' : 's') +
+        ' up the tenancy you are joining. Please read ' + (att.length > 1 ? 'them' : 'it') + ' before you sign: by signing the variation you agree to be bound by ' +
+        (att.length > 1 ? 'them' : 'it') + '. ' + (att.length > 1 ? 'They are' : 'It is') + ' also shown in full on the signing page.';
+      return html ? '<p>' + esc(t) + '</p><ul style="color:#555;font-size:14px">' + att.map(function (a) { return '<li>' + esc(a.name) + '</li>'; }).join('') + '</ul>'
+        : '\n\n' + t + '\n' + att.map(function (a) { return '- ' + a.name; }).join('\n');
     }
 
     /* ---------- tokens and lookups ---------- */
@@ -1377,8 +1403,10 @@ var ESign = (function () {
       var link = issueToken(env, s);
       if (s.status === 'Waiting') s.status = 'Sent';
       if (!s.sentAt) s.sentAt = iso();
-      var ok = mail(env, inviteEmail(env, s, link));
-      if (ok) audit(env, 'INVITE_SENT', actor || 'system', { signer: s.role, to: s.email, reason: reason || '' });
+      var m = inviteEmail(env, s, link), ok = mail(env, m);
+      var det = { signer: s.role, to: s.email, reason: reason || '' };
+      if (m.delivered) det.attached = m.delivered;   // the signed documents delivered with the link (name and SHA-256)
+      if (ok) audit(env, 'INVITE_SENT', actor || 'system', det);
       return { link: link, emailed: ok };
     }
 

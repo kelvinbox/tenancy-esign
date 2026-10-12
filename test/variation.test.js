@@ -228,3 +228,27 @@ test('admin.purge removes the agreement, its change-of-tenants variations, their
   assert.throws(() => b.call({ action: 'admin.get', id }), /wasn't found/);
   assert.deepEqual(b.call({ action: 'admin.purge', id }).deleted, [], 'repeating is harmless');
 });
+
+test('0.8.0: a joining tenant is emailed the signed original with their link (audited), and sees it as signed, in its own box', () => {
+  const { b, id } = signedOriginal();
+  const orig = b.db.envelopes[id];
+  const vid = b.call({ action: 'admin.createVariation', input: { parentId: id, effectiveDate: '2026-12-01', add: [riley], bondArrangement: 'Top-up.' } }).agreement.id;
+  const inv = b.lastEmail('riley@example.com', 'invite');
+  assert.deepEqual(inv.attachments, [{ ref: orig.final.ref, name: orig.final.name }], 'the signed original PDF is attached');
+  assert.match(inv.text, /Attached is the signed document that makes up the tenancy you are joining/);
+  assert.ok(inv.html.includes(orig.final.name));
+  const sent = b.call({ action: 'admin.get', id: vid }).events.filter(e => e.type === 'INVITE_SENT' && e.details.to === 'riley@example.com')[0];
+  assert.deepEqual(sent.details.attached, [{ name: orig.final.name, sha256: orig.final.sha256 }], 'what was delivered is in the audit trail');
+  assert.match(sent.text, /attached: .*SHA-256/);
+  // continuing tenants already have it: no attachment
+  const rv = b.call({ action: 'sign.open', token: lastInvite(b, 'riley@example.com') });
+  const ref = rv.document.sections.filter(s => s.ref);
+  assert.equal(ref[0].heading, 'Residential Tenancy Agreement', 'starts with the title, as signed');
+  assert.deepEqual(ref.slice(1, 4).map(s => s.heading), ['1. The parties', '2. The premises and the tenancy', '3. Rent and bond'], 'section headings exactly as signed');
+  assert.ok(ref.every(s => s.ref.id === 'ref-1' && s.ref.label === 'The original signed tenancy agreement' && s.ref.sha256 === orig.final.sha256));
+  assert.ok(ref[0].html.includes('class="kd"'), 'key details as in the original');
+  assert.equal(rv.document.sections.find(s => s.id === 'ref-intro').ref, undefined, 'the explanation sits outside the box');
+  // the continuing tenants' links (once it's their turn) carry no attachments
+  signAs(b, lastInvite(b, 'riley@example.com'));
+  assert.equal(b.lastEmail('mia@example.com', 'invite').attachments, undefined);
+});

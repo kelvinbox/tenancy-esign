@@ -176,6 +176,22 @@
     if (sent) { showDemoCode(); showVerifyBar(); } else showSendBar();
   }
 
+  /** The sections; a signed document a joining tenant is agreeing to goes in its own bordered box under a bold header. */
+  function sectionsHtml(list) {
+    var h = '', cur = null;
+    list.forEach(function (s) {
+      var r = s.ref ? s.ref.id : null;
+      if (r !== cur) {
+        if (cur) h += '</div>';
+        if (r) h += '<div class="refdoc"><div class="refdoc-h"><div class="refdoc-t">' + esc(s.ref.label) + '</div><div class="refdoc-s">' + esc(s.ref.signed) +
+          '. Read only: you are not re-signing it.</div><div class="refdoc-id">' + esc(s.ref.docId) + (s.ref.sha256 ? ' &middot; SHA-256 ' + esc(s.ref.sha256) : '') + '</div></div>';
+        cur = r;
+      }
+      h += '<details open data-sec="' + esc(s.id) + '"><summary><span class="tick">&#10003;</span><span>' + esc(s.heading) + '</span><span class="chev">&#8250;</span></summary><div class="sec-body">' + s.html + '</div></details>';
+    });
+    return h + (cur ? '</div>' : '');
+  }
+
   function renderRead() {
     var d = view.document;
     readStart = Date.now();
@@ -183,9 +199,7 @@
       '<div class="info small">Read each section. The <span class="fv">highlighted</span> parts are filled in for this tenancy. Tap a heading to fold it away.</div>' +
       '<div class="card doc">' + (d.brand || '') + '<h2 class="doc-title">' + esc(d.title) + '</h2><div class="doc-sub">' + esc(d.subtitle) + ' &middot; ' + esc(view.agreement.id) + '</div>' +
       (d.keyDetails || '') + '<p>' + d.intro + '</p>' +
-      d.sections.map(function (s) {
-        return '<details open data-sec="' + esc(s.id) + '"><summary><span class="tick">&#10003;</span><span>' + esc(s.heading) + '</span><span class="chev">&#8250;</span></summary><div class="sec-body">' + s.html + '</div></details>';
-      }).join('') +
+      sectionsHtml(d.sections) +
       (d.footer || '') + '<div class="end-marker" id="endMarker">&#8212; End of agreement &#8212;</div></div>' +
       attachmentsCard() +
       '<div class="card small"><b>Something not right?</b> If any of the terms are wrong, don\'t sign. <button class="btn link small" id="declineBtn" type="button">Tell the landlord and decline</button></div>';
