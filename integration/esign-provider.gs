@@ -192,6 +192,7 @@ function esignBuildAgreementInput_(ctx) {
       addressForService: d.landlordAddressForService || L.addressForService || ''
     },
     landlordSigners: esignLandlordSigners_(L),
+    branding: L.branding || null,   // how the agreement and its emails look (frozen with it when sent; not part of the terms)
     terms: {
       rentPerWeek: String(d.rentPerWeek !== undefined ? d.rentPerWeek : p.rent),
       bond: String(d.bond !== undefined ? d.bond : p.bond),

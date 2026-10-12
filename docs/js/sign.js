@@ -170,12 +170,12 @@
     readStart = Date.now();
     app.innerHTML = stepsHtml() +
       '<div class="info small">Read each section. The <span class="fv">highlighted</span> parts are filled in for this tenancy. Tap a heading to fold it away.</div>' +
-      '<div class="card doc"><h2 class="doc-title">' + esc(d.title) + '</h2><div class="doc-sub">' + esc(d.subtitle) + ' &middot; ' + esc(view.agreement.id) + '</div>' +
-      '<p>' + d.intro + '</p>' +
+      '<div class="card doc">' + (d.brand || '') + '<h2 class="doc-title">' + esc(d.title) + '</h2><div class="doc-sub">' + esc(d.subtitle) + ' &middot; ' + esc(view.agreement.id) + '</div>' +
+      (d.keyDetails || '') + '<p>' + d.intro + '</p>' +
       d.sections.map(function (s) {
         return '<details open data-sec="' + esc(s.id) + '"><summary><span class="tick">&#10003;</span><span>' + esc(s.heading) + '</span><span class="chev">&#8250;</span></summary><div class="sec-body">' + s.html + '</div></details>';
       }).join('') +
-      '<div class="end-marker" id="endMarker">&#8212; End of agreement &#8212;</div></div>' +
+      (d.footer || '') + '<div class="end-marker" id="endMarker">&#8212; End of agreement &#8212;</div></div>' +
       attachmentsCard() +
       '<div class="card small"><b>Something not right?</b> If any of the terms are wrong, don\'t sign. <button class="btn link small" id="declineBtn" type="button">Tell the landlord and decline</button></div>';
     setBar('<div class="grow hint" id="readHint">Scroll to the end to continue</div><button class="btn" id="go" disabled>I\'ve read it</button>');

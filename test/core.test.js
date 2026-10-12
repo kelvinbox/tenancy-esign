@@ -297,7 +297,7 @@ test('template 1.2.0: numbered additional terms, sections 5-7 wording', () => {
   const terms = Object.assign({}, sampleInput().terms, { additionalTerms: 'No smoking anywhere on the property.\nGarden to be kept tidy.\n\n  Bins out on Tuesday nights.  ' });
   const html = b.call({ action: 'admin.preview', input: sampleInput({ terms }) }).html;
   const other = html.slice(html.indexOf('8. Other terms'), html.indexOf('9. Signing electronically'));
-  const items = (other.match(/<li>/g) || []).length;
+  const items = (other.match(/class="cn"/g) || []).length;
   assert.equal(items, 5, 'smoking + pets + 3 additional terms, each its own numbered item');
   assert.ok(other.indexOf('Garden to be kept tidy.') > 0 && other.indexOf('Bins out on Tuesday nights.') > 0);
   assert.ok(html.indexOf('minor change') < 0, 'minor-change wording removed from sections 5 and 6');
@@ -313,7 +313,7 @@ test('template 1.2.0: numbered additional terms, sections 5-7 wording', () => {
   // no additional terms: no empty item
   const none = b.call({ action: 'admin.preview', input: sampleInput() }).html;
   const noneOther = none.slice(none.indexOf('8. Other terms'), none.indexOf('9. Signing electronically'));
-  assert.equal((noneOther.match(/<li>/g) || []).length, 2);
+  assert.equal((noneOther.match(/class="cn"/g) || []).length, 2);
 });
 
 test('template 1.3.0: section 6 bars subletting without explicit permission', () => {
@@ -429,4 +429,53 @@ test('admin.progress shows the agreement as it stands while out for signing, wit
   assert.ok(/data:image\/png;base64/.test(r.html), 'their signature image is shown');
   assert.ok(/not opened yet|not signed yet/.test(r.html), 'the next signer shows where they are up to');
   assert.equal(JSON.stringify(b.db.envelopes[id]), before, 'nothing changed'); assert.equal((b.db.audit[id] || []).length, auditBefore, 'nothing audited');
+});
+
+test('0.4.0 layout: numbered clauses, key details box, signature grid, signatures on a new page', () => {
+  const b = memoryBackend();
+  const terms = Object.assign({}, sampleInput().terms, { additionalTerms: 'Garden to be kept tidy.\nBins out on Tuesday nights.' });
+  const html = b.call({ action: 'admin.preview', input: sampleInput({ terms }) }).html;
+  assert.ok(/<td class="cn">6\.1<\/td>/.test(html) && /<td class="cn">5\.1<\/td>/.test(html), 'clauses numbered from the section');
+  assert.ok(/<td class="cn">3\.4<\/td>/.test(html), 'rent and bond clauses numbered after the table');
+  assert.ok(/<td class="cn">8\.4<\/td><td class="ct">Bins out on Tuesday nights\.<\/td>/.test(html), 'additional terms continue the numbering');
+  assert.ok(html.indexOf('<table class="kd">') > 0 && html.indexOf('<table class="kd">') < html.indexOf('1. The parties'), 'key details at the top');
+  assert.ok(/Fixed term: .* to /.test(html.slice(html.indexOf('<table class="kd">'), html.indexOf('</table>', html.indexOf('<table class="kd">')))), 'term in key details');
+  assert.ok(html.indexOf('<table class="sigs sg">') > 0, 'signatures two to a row in the PDF and previews');
+  assert.ok(html.indexOf('<div class="pb"></div><h2>10. Signatures</h2>') > 0, 'signatures start a new page');
+  assert.ok(html.indexOf('<ol class="terms">') < 0);
+});
+
+test('0.5.0 branding: classic default navy with initials badge, modern colour, footer note, logo checks', () => {
+  const b = memoryBackend();
+  assert.equal(ESign.brandInitials('Example Family Trust'), 'EF');
+  assert.equal(ESign.brandInitials('The Box Trust'), 'B');
+  assert.equal(ESign.brandInitials('Les & Jennifer Box'), 'LJ');
+  const plain = b.call({ action: 'admin.preview', input: sampleInput() }).html;
+  assert.ok(plain.indexOf('class="bh"') < 0, 'no branding sent: plain layout');
+  const classic = b.call({ action: 'admin.preview', input: sampleInput({ branding: { style: 'classic', colour: 'nonsense' } }) }).html;
+  assert.ok(classic.indexOf('class="bh"') > 0 && />EF<\/td>/.test(classic), 'initials badge when there is no logo');
+  assert.ok(classic.indexOf('#1f3a5f') > 0 && /Georgia/.test(classic), 'classic default navy, serif headings');
+  const modern = b.call({ action: 'admin.preview', input: sampleInput({ branding: { style: 'modern', colour: '#7C3AED', displayName: 'Box Rentals', contactLine: '03 000 0000 | rentals@example.com', footerNote: 'Thank you for renting with us.' } }) }).html;
+  assert.ok(modern.indexOf('#7c3aed') > 0 && modern.indexOf('#1f3a5f') < 0, 'chosen colour');
+  assert.ok(modern.indexOf('Box Rentals') > 0 && modern.indexOf('rentals@example.com') > 0 && /class="bf"[^>]*>Thank you for renting with us\./.test(modern));
+  const badLogo = b.call({ action: 'admin.preview', input: sampleInput({ branding: { style: 'modern', logo: 'data:image/svg+xml;base64,PHN2Zz4=' } }) });
+  assert.ok(badLogo.warnings.some(w => /logo could not be used/.test(w)) && badLogo.html.indexOf('<img') < 0);
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  const logo = b.call({ action: 'admin.preview', input: sampleInput({ branding: { style: 'classic', logo: png } }) }).html;
+  assert.ok(logo.indexOf('<img src="' + png) > 0, 'logo shown instead of initials');
+});
+
+test('0.5.0 branding is frozen with the agreement, outside the terms fingerprint, and brands the emails', () => {
+  const b = memoryBackend();
+  const a = b.call({ action: 'admin.create', input: sampleInput({ branding: { style: 'modern', colour: '#7c3aed', displayName: 'Box Rentals' } }) }).agreement;
+  const c = b.call({ action: 'admin.create', input: sampleInput() }).agreement;
+  assert.equal(b.db.envelopes[a.id].branding.colour, '#7c3aed');
+  assert.equal(b.db.envelopes[a.id].termsHash, b.db.envelopes[c.id].termsHash, 'look does not change the locked terms');
+  const inv = b.db.outbox.filter(m => m.kind === 'invite')[0];
+  assert.equal(inv.fromName, 'Box Rentals');
+  assert.ok(inv.html.indexOf('Box Rentals') > 0 && inv.html.indexOf('background:#7c3aed') > 0 && inv.html.indexOf('#0f766e') < 0, 'letterhead and button in the colour');
+  const plainInv = b.db.outbox.filter(m => m.kind === 'invite')[1];
+  assert.equal(plainInv.fromName, undefined);
+  const v = b.call({ action: 'sign.open', token: b.tokenFrom(inv) });
+  assert.ok(v.document.brand.indexOf('Box Rentals') > 0, 'signing page shows the letterhead');
 });

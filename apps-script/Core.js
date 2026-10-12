@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.3.14';
+  var VERSION = '0.5.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -266,7 +266,8 @@ var ESign = (function () {
       },
       terms: {},
       tenants: [],
-      source: input.source ? clone(input.source) : null
+      source: input.source ? clone(input.source) : null,
+      branding: cleanBranding(input.branding, warnings)
     };
 
     // Up to 2 people sign for the landlord (e.g. co-owners or two trustees). Older callers send a
@@ -665,6 +666,106 @@ var ESign = (function () {
       '</div><table class="kv">' + rows + '</table></div>';
   }
 
+  /* ---------- Landlord branding ---------- */
+  var BRAND_DEFAULT = { classic: '#1f3a5f', modern: '#0f766e' };   // navy, teal
+  var LOGO_MAX = 150000;   // characters of data URI (Tenant Management shrinks logos well under this)
+
+  /** {style, colour, logo, displayName, contactLine, footerNote} or null (no branding sent: the plain layout). */
+  function cleanBranding(b, warnings) {
+    if (!b || typeof b !== 'object') return null;
+    var style = b.style === 'modern' ? 'modern' : 'classic', colour = str(b.colour).toLowerCase(), logo = str(b.logo);
+    if (!/^#[0-9a-f]{6}$/.test(colour)) colour = BRAND_DEFAULT[style];
+    if (logo && (logo.length > LOGO_MAX || !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+\/=]+$/.test(logo))) {
+      logo = '';
+      if (warnings) warnings.push('The landlord logo could not be used (it must be a PNG or JPEG under 100 KB), so their initials are shown instead.');
+    }
+    return { style: style, colour: colour, logo: logo, displayName: str(b.displayName).slice(0, 80),
+             contactLine: str(b.contactLine).slice(0, 160), footerNote: str(b.footerNote).slice(0, 300) };
+  }
+  /** "Example Family Trust" -> "EF" (words like Trust, Ltd and The are skipped). */
+  function brandInitials(name) {
+    var w = str(name).split(/[\s&]+/).filter(function (x) { return /^[A-Za-z0-9]/.test(x); });
+    var k = w.filter(function (x) { return !/^(the|of|and|trust|trustees|ltd|limited|nz)$/i.test(x); });
+    return ((k.length ? k : w).slice(0, 2).map(function (x) { return x.charAt(0); }).join('') || '?').toUpperCase();
+  }
+  /** A colour mixed with white (w = 0..1, the share of white). */
+  function hexMix(hex, w) {
+    var n = parseInt(hex.slice(1), 16), m = function (c) { return Math.round(c + (255 - c) * w); };
+    return '#' + [n >> 16 & 255, n >> 8 & 255, n & 255].map(function (c) { return ('0' + m(c).toString(16)).slice(-2); }).join('');
+  }
+  /** Black or white text, whichever reads better on the colour. */
+  function onColour(hex) {
+    var n = parseInt(hex.slice(1), 16), r = n >> 16 & 255, g = n >> 8 & 255, b = n & 255;
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#111111' : '#ffffff';
+  }
+  /** The logo, or an initials badge in the landlord's colour (round for Classic, rounded square for Modern). */
+  function brandMark(b, name, size, src) {
+    if (b.logo) return '<img src="' + esc(src || b.logo) + '" alt="' + esc(name) + '" style="max-height:' + size + 'px;max-width:' + (size * 4) + 'px;vertical-align:middle">';
+    return '<table style="border-collapse:collapse;width:auto;margin:0 auto"><tr><td style="width:' + size + 'px;height:' + size + 'px;padding:0;border:0;background:' + b.colour +
+      ';color:' + onColour(b.colour) + ';text-align:center;vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:' + Math.round(size * 0.4) +
+      'px;letter-spacing:1px;border-radius:' + (b.style === 'modern' ? Math.round(size / 5) + 'px' : '50%') + '">' + esc(brandInitials(name)) + '</td></tr></table>';
+  }
+  /** The letterhead at the top of the agreement (inline styles, so it looks the same in the PDF and on the signing page). */
+  function renderBrandHeader(env) {
+    var b = env.branding;
+    if (!b) return '';
+    var name = b.displayName || env.landlord.name;
+    var contact = b.contactLine ? '<div style="font-size:9pt;color:#555;margin-top:2px">' + esc(b.contactLine) + '</div>' : '';
+    if (b.style === 'modern') {
+      return '<div class="bh" style="margin-bottom:10px"><div style="height:6px;background:' + b.colour + ';margin-bottom:10px"></div>' +
+        '<table style="border-collapse:collapse;width:100%"><tr><td style="width:1%;padding:0 12px 0 0;border:0;vertical-align:middle;white-space:nowrap">' + brandMark(b, name, 46) + '</td>' +
+        '<td style="border:0;padding:0;vertical-align:middle;text-align:left"><div style="font-size:14pt;font-weight:700;color:' + b.colour + '">' + esc(name) + '</div>' + contact + '</td></tr></table></div>';
+    }
+    return '<div class="bh" style="text-align:center;margin-bottom:10px">' + brandMark(b, name, 52) +
+      '<div style="font-family:Georgia,Times New Roman,serif;font-size:15pt;color:' + b.colour + ';margin-top:6px;letter-spacing:.5px">' + esc(name) + '</div>' + contact +
+      '<div style="border-top:2px solid ' + b.colour + ';border-bottom:1px solid ' + b.colour + ';height:2px;margin-top:10px"></div></div>';
+  }
+  /** Print styles for the landlord's look, added after PRINT_CSS. */
+  function brandCss(b) {
+    if (!b) return '';
+    var c = b.colour, tint = hexMix(c, 0.9);
+    if (b.style === 'modern') {
+      return 'h2{color:' + c + ';border-bottom:0;border-left:4px solid ' + c + ';padding:2px 0 2px 8px;background:' + hexMix(c, 0.94) + '}h4{color:' + c + '}' +
+        'table.kd{border:0;border-top:3px solid ' + c + ';background:' + tint + '}table.kd td{border:0}.kd-l{color:' + c + '}' +
+        'td.cn{color:' + c + '}table.kv th{background:' + tint + '}.party-h{color:' + c + '}.cert-h{background:' + c + ';color:' + onColour(c) + '}.bf{border-top:2px solid ' + c + '}';
+    }
+    return 'h1,h2,h3,h4{font-family:Georgia,Times New Roman,serif}h1{text-align:center;color:' + c + ';font-size:18pt;letter-spacing:.5px}.sub{text-align:center}' +
+      'h2{color:' + c + ';border-bottom:1px solid ' + c + ';font-weight:normal;font-size:13.5pt}h4{color:' + c + '}' +
+      'table.kd{border:1.5px solid ' + c + '}.kd-l{color:' + c + '}td.cn{color:' + c + '}table.kv th{background:' + tint + '}.party-h{color:' + c + '}' +
+      '.cert-h{background:' + c + ';color:' + onColour(c) + '}.bf{border-top:1px solid ' + c + '}';
+  }
+  /** The footer note at the end of the agreement (e.g. a business number or a thank-you line). */
+  function renderBrandFooter(env) {
+    var b = env.branding;
+    return b && b.footerNote ? '<div class="bf" style="margin-top:18px;padding-top:6px;font-size:8.5pt;color:#555">' + esc(b.footerNote).replace(/\n/g, '<br>') + '</div>' : '';
+  }
+  /** Email letterhead: logo (an inline image, cid:brandlogo) or initials badge, then the name, over a rule in the colour. */
+  function brandEmailHeader(env) {
+    var b = env.branding, name = b.displayName || env.landlord.name;
+    return '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;border-bottom:3px solid ' + b.colour + ';padding-bottom:10px;margin-bottom:16px">' +
+      '<table style="border-collapse:collapse"><tr><td style="padding:0 12px 0 0;vertical-align:middle">' + brandMark(b, name, 40, b.logo ? 'cid:brandlogo' : '') + '</td>' +
+      '<td style="vertical-align:middle;font-size:17px;font-weight:bold;color:' + b.colour + '">' + esc(name) + '</td></tr></table></div>';
+  }
+
+  /** Signature blocks two to a row in the PDF and previews; stacked on the signing page (phones). */
+  function sigGrid(blocks, mode) {
+    if (mode === 'view' || blocks.length < 2) return '<div class="sigs">' + blocks.join('') + '</div>';
+    var rows = '';
+    for (var i = 0; i < blocks.length; i += 2) rows += '<tr><td class="sgc">' + blocks[i] + '</td><td class="sgc">' + (blocks[i + 1] || '') + '</td></tr>';
+    return '<table class="sigs sg">' + rows + '</table>';
+  }
+
+  /** At-a-glance summary at the top of a tenancy agreement: premises, term, rent, bond, parties. */
+  function renderKeyDetails(env, f, mode) {
+    var tenants = env.signers.filter(function (s) { return s.kind === 'tenant'; }).map(function (s) { return val(signerDetails(s).name, mode); });
+    var cell = function (label, html) { return '<td><div class="kd-l">' + esc(label) + '</div><div class="kd-v">' + html + '</div></td>'; };
+    var term = f.IsFixedTerm ? fillText('Fixed term: {{TenancyStart}} to {{TenancyEnd}}', f, mode) : fillText('Periodic, from {{TenancyStart}}', f, mode);
+    return '<table class="kd"><tr>' + cell('Premises', fillText('{{PropertyAddress}}', f, mode)) + cell('Tenancy', term) +
+      cell('Rent', fillText('${{RentPerWeek}} per week', f, mode)) + '</tr><tr>' +
+      cell('Bond', fillText('${{BondAmount}}', f, mode)) + cell('Landlord', fillText('{{LandlordName}}', f, mode)) +
+      cell(tenants.length > 1 ? 'Tenants' : 'Tenant', tenants.join('<br>') || '&mdash;') + '</tr></table>';
+  }
+
   function renderSignatures(env, opts, onlyKind) {
     var mode = opts.mode, images = opts.images || {}, fmt = opts.fmt || function (x) { return x; };
     return env.signers.filter(function (s) { return !onlyKind || s.kind === onlyKind; }).map(function (s) {
@@ -683,7 +784,7 @@ var ESign = (function () {
         '<div class="sig-box">' + box + '</div>' +
         '<div class="sig-meta">' + meta + (mode === 'final' && s.signature ? '<br>Typed name: ' + esc(s.signature.typedName) : '') +
         '</div></div>';
-    }).join('');
+    });
   }
 
   function renderBlock(b, env, f, opts) {
@@ -696,12 +797,17 @@ var ESign = (function () {
           return kvRow(r[0], fillText(r[1], f, mode));
         }).join('') + '</table>';
       case 'list':
-        return '<ol class="terms">' + b.items.filter(function (it) { return cond(it, f); }).map(function (it) {
+        // numbered clauses written out (6.1, 6.2 ...) so the numbers survive the PDF and can be quoted
+        var ctx = opts.ctx || { no: '', n: 0 }, clause = function (html) {
+          ctx.n++;
+          return '<tr><td class="cn">' + (ctx.no ? ctx.no + '.' : '') + ctx.n + '</td><td class="ct">' + html + '</td></tr>';
+        };
+        return '<table class="cl">' + b.items.filter(function (it) { return cond(it, f); }).map(function (it) {
           // {each: 'Field'}: one numbered item per line of the field (e.g. the property's additional terms)
           if (it && it.each) return String(f[it.each] || '').split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean)
-            .map(function (x) { return '<li>' + val(x, mode) + '</li>'; }).join('');
-          return '<li>' + fillText(typeof it === 'string' ? it : it.text, f, mode) + '</li>';
-        }).join('') + '</ol>';
+            .map(function (x) { return clause(val(x, mode)); }).join('');
+          return clause(fillText(typeof it === 'string' ? it : it.text, f, mode));
+        }).join('') + '</table>';
       case 'landlord':
         return '<div class="party"><div class="party-h">Landlord</div><table class="kv">' +
           kvRow('Name', fillText('{{LandlordName}}', f, mode)) +
@@ -713,8 +819,8 @@ var ESign = (function () {
       case 'tenants':
         return env.signers.filter(function (s) { return s.kind === 'tenant'; })
           .map(function (s) { return renderParty(s, env, mode); }).join('');
-      case 'signatures': return '<div class="sigs">' + renderSignatures(env, opts) + '</div>';
-      case 'declaration': return '<p>' + esc(declarationText(env)) + '</p><div class="sigs">' + renderSignatures(env, opts, 'landlord') + '</div>';
+      case 'signatures': return sigGrid(renderSignatures(env, opts), mode);
+      case 'declaration': return '<p>' + esc(declarationText(env)) + '</p>' + sigGrid(renderSignatures(env, opts, 'landlord'), mode);
       case 'documents':
         return '<table class="kv">' + (env.incorporates || []).map(function (d) {
           return kvRow('Version ' + d.version + ': ' + (d.kind === 'variation' ? 'variation (change of tenants)' : 'tenancy agreement'),
@@ -800,7 +906,7 @@ var ESign = (function () {
       '</style></head><body>' + h + '</body></html>';
   }
 
-  /** Returns {title, subtitle, intro, sections:[{id, heading, html}]} */
+  /** Returns {title, subtitle, intro, keyDetails, sections:[{id, heading, html}]} */
   function renderAgreement(env, opts) {
     opts = opts || {};
     var f = buildFields(env), tpl = env.template;
@@ -808,12 +914,17 @@ var ESign = (function () {
       title: tpl.title,
       subtitle: tpl.subtitle,
       intro: fillText(tpl.intro, f, opts.mode),
+      keyDetails: env.kind === 'variation' ? '' : renderKeyDetails(env, f, opts.mode),
+      brand: renderBrandHeader(env),
+      footer: renderBrandFooter(env),
       sections: tpl.sections.map(function (sec) {
+        // clauses are numbered from the heading's number: "6. The tenant agrees to" gives 6.1, 6.2 ...
+        var o = Object.assign({}, opts, { ctx: { no: (/^(\d+)\./.exec(sec.heading) || [])[1] || '', n: 0 } });
         return {
           id: sec.id,
           heading: sec.heading,
           html: sec.blocks.filter(function (b) { return cond(b, f); })
-            .map(function (b) { return renderBlock(b, env, f, opts); }).join('')
+            .map(function (b) { return renderBlock(b, env, f, o); }).join('')
         };
       })
     };
@@ -875,7 +986,12 @@ var ESign = (function () {
     'table{border-collapse:collapse;width:100%}table.kv th{text-align:left;vertical-align:top;width:34%;padding:3px 6px;background:#f2f4f4;border:1px solid #ccc;font-weight:600}' +
     'table.kv td{padding:3px 6px;border:1px solid #ccc;vertical-align:top}' +
     '.party{margin:6px 0 10px;page-break-inside:avoid}.party-h{font-weight:700;margin-bottom:3px}' +
-    'ol.terms{margin:4px 0 4px 18px;padding:0}ol.terms li{margin:2px 0}' +
+    'h2{page-break-after:avoid}h4{page-break-after:avoid}' +
+    'table.cl{margin:4px 0}table.cl tr{page-break-inside:avoid}table.cl td{padding:2px 4px 2px 0;vertical-align:top;border:0}' +
+    'td.cn{width:30px;font-weight:700;color:#333;white-space:nowrap}' +
+    'table.kd{margin:8px 0 12px;border:1.5px solid #333;page-break-inside:avoid}table.kd td{border:1px solid #bbb;padding:5px 8px;vertical-align:top;width:33%}' +
+    '.kd-l{font-size:7.5pt;text-transform:uppercase;letter-spacing:.6px;color:#555}.kd-v{font-weight:700;margin-top:1px}' +
+    'table.sg td.sgc{width:50%;vertical-align:top;padding:0 4px;border:0}' +
     '.sigs{margin-top:6px}.sig{border:1px solid #bbb;padding:8px;margin:0 0 8px;page-break-inside:avoid}' +
     '.sig-role{font-size:9pt;color:#555}.sig-name{font-weight:700}.sig-box{height:70px;margin:4px 0;border-bottom:1px solid #333}' +
     '.sig-box img{height:68px;max-width:100%}.sig-meta{font-size:8.5pt;color:#444}' +
@@ -942,10 +1058,13 @@ var ESign = (function () {
   }
 
   function renderAgreementBody(env, a) {
-    var h = '<h1>' + esc(a.title) + '</h1><div class="sub">' + esc(a.subtitle) + ' &middot; ' + esc(env.id) + '</div>';
-    h += '<p>' + a.intro + '</p>';
-    a.sections.forEach(function (s) { h += '<h2>' + esc(s.heading) + '</h2>' + s.html; });
-    return h;
+    var h = (a.brand || '') + '<h1>' + esc(a.title) + '</h1><div class="sub">' + esc(a.subtitle) + ' &middot; ' + esc(env.id) + '</div>';
+    h += (a.keyDetails || '') + '<p>' + a.intro + '</p>';
+    a.sections.forEach(function (s) {
+      // the signatures start on a fresh page, so they're never split from their heading
+      h += (s.id === 'signatures' ? '<div class="pb"></div>' : '') + '<h2>' + esc(s.heading) + '</h2>' + s.html;
+    });
+    return h + (a.footer || '');
   }
 
   /** The complete signed record: agreement, signatures and certificate. */
@@ -953,7 +1072,7 @@ var ESign = (function () {
     opts = opts || {};
     var a = renderAgreement(env, { mode: 'final', images: opts.images, fmt: opts.fmt });
     return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(env.title) + ' (' + esc(env.id) + ')</title>' +
-      '<style>' + PRINT_CSS + '</style></head><body>' + renderAgreementBody(env, a) +
+      '<style>' + PRINT_CSS + brandCss(env.branding) + '</style></head><body>' + renderAgreementBody(env, a) +
       '<div class="pb"></div>' + renderCertificate(env, events, opts) + '</body></html>';
   }
 
@@ -974,14 +1093,14 @@ var ESign = (function () {
     var banner = '<div style="border:2px solid #b45309;background:#fffbeb;color:#78350f;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px">' +
       '<b>Progress preview, not a signed copy.</b> ' + (env.kind === 'variation' ? 'This change of tenants' : 'This tenancy agreement') + ' is ' + esc(({ Sent: 'out for signing', Declined: 'declined', Cancelled: 'cancelled', Expired: 'expired', Completed: 'complete' })[env.status] || String(env.status || '').toLowerCase()) + ': ' + done + ' of ' + env.signers.length +
       ' signed. Details and signatures below are as given so far.<table class="kv" style="margin-top:8px">' + rows + '</table></div>';
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Progress</title><style>' + PRINT_CSS +
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Progress</title><style>' + PRINT_CSS + brandCss(env.branding) +
       '</style></head><body>' + banner + renderAgreementBody(env, a) + '</body></html>';
   }
 
   /** Unsigned preview, for the landlord before sending. */
   function renderPreviewHtml(env, fmt) {
     var a = renderAgreement(env, { mode: 'final', fmt: fmt });
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview</title><style>' + PRINT_CSS +
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Preview</title><style>' + PRINT_CSS + brandCss(env.branding) +
       '</style></head><body>' + renderAgreementBody(env, a) + '</body></html>';
   }
 
@@ -1183,6 +1302,12 @@ var ESign = (function () {
     }
 
     function mail(env, m) {
+      var b = env && env.branding;
+      if (b && m.html) {
+        m.html = brandEmailHeader(env) + m.html.split('#0f766e').join(b.colour);
+        m.fromName = b.displayName || env.landlord.name;
+        if (b.logo) m.inlineImages = { brandlogo: b.logo };
+      }
       try {
         svc.sendEmail(m);
         return true;
@@ -1439,6 +1564,7 @@ var ESign = (function () {
         templateHash: hashOf(tpl),
         landlord: v.landlord,
         terms: v.terms,
+        branding: v.branding,   // how it looks: frozen with the agreement, not part of the locked terms
         source: v.source,
         signers: [],
         auditCount: 0,
@@ -1515,6 +1641,8 @@ var ESign = (function () {
         templateHash: hashOf(tpl),
         landlord: clone(parent.landlord),
         terms: clone(parent.terms),
+        // the landlord's current look if Tenant Management sends it, else the original agreement's
+        branding: input && input.branding ? cleanBranding(input.branding, []) : (parent.branding ? clone(parent.branding) : null),
         source: parent.source ? clone(parent.source) : null,
         parent: { id: parent.id, version: versionOf(parent), finalSha256: parent.final.sha256, termsHash: parent.termsHash },
         tenantsBefore: vc.ctx.tenants,
@@ -1989,7 +2117,7 @@ var ESign = (function () {
         var v = r.value, tpl = (svc.templates || {})[v.templateId];
         if (!tpl) fail('Unknown agreement template.');
         var env = {
-          id: 'PREVIEW', template: tpl, propertyAddress: v.propertyAddress, landlord: v.landlord, terms: v.terms,
+          id: 'PREVIEW', template: tpl, propertyAddress: v.propertyAddress, landlord: v.landlord, terms: v.terms, branding: v.branding,
           signers: v.tenants.map(function (tn, i) {
             return { id: 'T' + (i + 1), role: 'Tenant' + (i + 1), kind: 'tenant', email: tn.email, status: 'Waiting',
               prefill: { name: tn.name, email: tn.email, mobile: tn.mobile, idType: tn.idType, idNumber: tn.idNumber, under18: tn.under18 } };
@@ -2077,6 +2205,8 @@ var ESign = (function () {
     validateVariation: validateVariation,
     validateDetails: validateDetails,
     buildFields: buildFields,
+    cleanBranding: cleanBranding,
+    brandInitials: brandInitials,
     renderAgreement: renderAgreement,
     renderFinalHtml: renderFinalHtml,
     renderCertificate: renderCertificate,

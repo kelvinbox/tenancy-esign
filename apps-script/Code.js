@@ -226,7 +226,14 @@ function services_(p) {
       return ('000000000' + v).slice(-n);
     },
     sendEmail: function (m) {
-      var opts = { to: m.to, subject: m.subject, body: m.text, htmlBody: m.html, name: p.OWNER_NAME || 'The landlord' };
+      var opts = { to: m.to, subject: m.subject, body: m.text, htmlBody: m.html, name: m.fromName || p.OWNER_NAME || 'The landlord' };
+      if (m.inlineImages) {   // the landlord's logo in the email letterhead (data URIs -> inline images)
+        opts.inlineImages = {};
+        Object.keys(m.inlineImages).forEach(function (k) {
+          var d = String(m.inlineImages[k]), mime = d.slice(5, d.indexOf(';'));
+          opts.inlineImages[k] = Utilities.newBlob(Utilities.base64Decode(d.split(',')[1]), mime, k);
+        });
+      }
       if (p.OWNER_EMAIL && p.OWNER_EMAIL.toLowerCase() !== String(m.to).toLowerCase()) opts.replyTo = p.OWNER_EMAIL;
       if (m.attachments && m.attachments.length) opts.attachments = m.attachments.map(function (a) { return DriveApp.getFileById(a.ref).getBlob(); });
       if (p.TEST_EMAIL_REDIRECT) {

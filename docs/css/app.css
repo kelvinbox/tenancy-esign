@@ -161,8 +161,14 @@ input[readonly] { background: #f1f5f9; color: var(--ink-2); }
 .doc table.kv { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0; }
 .doc table.kv th { text-align: left; font-weight: 600; color: var(--ink-2); padding: 7px 8px 7px 0; vertical-align: top; width: 40%; border-bottom: 1px solid var(--line); }
 .doc table.kv td { padding: 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; word-break: break-word; }
-.doc ol.terms { padding-left: 22px; margin: 6px 0; }
-.doc ol.terms li { margin: 5px 0; }
+.doc table.cl { border-collapse: collapse; margin: 6px 0; }
+.doc table.cl td { vertical-align: top; padding: 5px 0; }
+.doc td.cn { width: 38px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.doc table.kd { width: 100%; border-collapse: collapse; margin: 10px 0 12px; border: 1px solid var(--line); font-size: 14px; }
+.doc table.kd td { padding: 8px 10px; vertical-align: top; border: 1px solid var(--line); width: 33%; }
+.doc .kd-l { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-2); }
+.doc .kd-v { font-weight: 600; margin-top: 2px; word-break: break-word; }
+@media (max-width: 560px) { .doc table.kd, .doc table.kd tbody, .doc table.kd tr, .doc table.kd td { display: block; width: auto; } .doc table.kd td { border-width: 0 0 1px; } }
 .doc .party { background: #f8fafb; border-radius: 10px; padding: 8px 12px; margin: 8px 0; }
 .doc .party-h { font-weight: 700; }
 .fv { background: #e6f6f4; color: #0b5d56; border-radius: 4px; padding: 0 3px; font-weight: 600; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
