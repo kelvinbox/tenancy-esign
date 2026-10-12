@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.5.0';
+  var VERSION = '0.5.1';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -708,15 +708,15 @@ var ESign = (function () {
   function renderBrandHeader(env) {
     var b = env.branding;
     if (!b) return '';
-    var name = b.displayName || env.landlord.name;
+    var name = b.displayName || env.landlord.name;   // for the initials badge; the name itself shows only if one was entered
     var contact = b.contactLine ? '<div style="font-size:9pt;color:#555;margin-top:2px">' + esc(b.contactLine) + '</div>' : '';
     if (b.style === 'modern') {
       return '<div class="bh" style="margin-bottom:10px"><div style="height:6px;background:' + b.colour + ';margin-bottom:10px"></div>' +
         '<table style="border-collapse:collapse;width:100%"><tr><td style="width:1%;padding:0 12px 0 0;border:0;vertical-align:middle;white-space:nowrap">' + brandMark(b, name, 46) + '</td>' +
-        '<td style="border:0;padding:0;vertical-align:middle;text-align:left"><div style="font-size:14pt;font-weight:700;color:' + b.colour + '">' + esc(name) + '</div>' + contact + '</td></tr></table></div>';
+        '<td style="border:0;padding:0;vertical-align:middle;text-align:left">' + (b.displayName ? '<div style="font-size:14pt;font-weight:700;color:' + b.colour + '">' + esc(b.displayName) + '</div>' : '') + contact + '</td></tr></table></div>';
     }
     return '<div class="bh" style="text-align:center;margin-bottom:10px">' + brandMark(b, name, 52) +
-      '<div style="font-family:Georgia,Times New Roman,serif;font-size:15pt;color:' + b.colour + ';margin-top:6px;letter-spacing:.5px">' + esc(name) + '</div>' + contact +
+      (b.displayName ? '<div style="font-family:Georgia,Times New Roman,serif;font-size:15pt;color:' + b.colour + ';margin-top:6px;letter-spacing:.5px">' + esc(b.displayName) + '</div>' : '') + contact +
       '<div style="border-top:2px solid ' + b.colour + ';border-bottom:1px solid ' + b.colour + ';height:2px;margin-top:10px"></div></div>';
   }
   /** Print styles for the landlord's look, added after PRINT_CSS. */
@@ -743,7 +743,7 @@ var ESign = (function () {
     var b = env.branding, name = b.displayName || env.landlord.name;
     return '<div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;border-bottom:3px solid ' + b.colour + ';padding-bottom:10px;margin-bottom:16px">' +
       '<table style="border-collapse:collapse"><tr><td style="padding:0 12px 0 0;vertical-align:middle">' + brandMark(b, name, 40, b.logo ? 'cid:brandlogo' : '') + '</td>' +
-      '<td style="vertical-align:middle;font-size:17px;font-weight:bold;color:' + b.colour + '">' + esc(name) + '</td></tr></table></div>';
+      '<td style="vertical-align:middle;font-size:17px;font-weight:bold;color:' + b.colour + '">' + esc(b.displayName) + '</td></tr></table></div>';
   }
 
   /** Signature blocks two to a row in the PDF and previews; stacked on the signing page (phones). */

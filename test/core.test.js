@@ -479,3 +479,13 @@ test('0.5.0 branding is frozen with the agreement, outside the terms fingerprint
   const v = b.call({ action: 'sign.open', token: b.tokenFrom(inv) });
   assert.ok(v.document.brand.indexOf('Box Rentals') > 0, 'signing page shows the letterhead');
 });
+
+test('0.5.1 branding: a blank display name shows no name at the top (initials still from the landlord)', () => {
+  const b = memoryBackend();
+  for (const style of ['classic', 'modern']) {
+    const html = b.call({ action: 'admin.preview', input: sampleInput({ branding: { style } }) }).html;
+    const head = html.slice(html.indexOf('class="bh"'), html.indexOf('<h1'));
+    assert.ok(/>EF<\/td>/.test(head), style + ': initials badge');
+    assert.ok(head.indexOf('Example Family Trust') < 0, style + ': no name in the letterhead');
+  }
+});
