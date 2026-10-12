@@ -366,27 +366,41 @@
   }
 
   function renderLocate() {
-    var d = device(), have = view.me.location;
+    var d = device(), have = view.me.location, declined = !have && view.me.locationDeclined, lastReason = '';
     app.innerHTML = stepsHtml() +
       '<div class="card"><h2>&#128205; Where you\'re signing</h2>' +
       '<p>As part of signing, we record the location of the device you sign on. It goes in the agreement\'s audit trail and signing certificate, alongside the time and device, as evidence of where it was signed. It isn\'t shown in the agreement itself.</p>' +
       (have ? '<div class="info"><b>&#10003; Location shared.</b> ' + esc(Number(have.lat).toFixed(5) + ', ' + Number(have.lng).toFixed(5)) +
           (have.accuracy !== null && have.accuracy !== undefined ? ' (within ' + esc(have.accuracy) + ' m)' : '') + '</div>'
+        : declined ? '<div class="info"><b>You chose to sign without sharing your location.</b> That\'s recorded in the audit trail. You can still share it now if you like.</div>'
         : '<div class="info"><b>Heads up:</b> when you tap <b>Share my location</b>, your ' + esc(d.name) + ' will ask for permission. ' + promptHint(d) + '</div>') +
       '<div id="locHelp"></div></div>';
-    setBar('<button class="btn ghost" id="back">Back</button>' + (have ? '<button class="btn grow" id="go">Continue</button>' : '<button class="btn grow" id="share">&#128205; Share my location</button>'));
+    setBar('<button class="btn ghost" id="back">Back</button>' + (have || declined ? '<button class="btn grow" id="go">Continue</button>' : '<button class="btn grow" id="share">&#128205; Share my location</button>'));
     $('#back').addEventListener('click', function () { step = 'details'; render(); });
     if (have) { $('#go').addEventListener('click', function () { step = 'sign'; render(); }); return; }
+    if (declined) {
+      $('#go').addEventListener('click', function () { step = 'sign'; render(); });
+      $('#locHelp').innerHTML = '<button class="btn light small" id="share" type="button">&#128205; Share my location after all</button>';
+    }
     var btn = $('#share');
     function failed(code, message) {
       UI.busy(btn, false);
       btn.innerHTML = '&#128205; Try again';
       ESignApi.signerCall('sign.location', { token: token, location: { error: { code: code, message: message || '' } } }).catch(function () { /* recorded when possible */ });
       var title = code === 1 ? 'Location access is turned off for this page' : code === 2 ? 'Your device couldn\'t work out where you are' : code === 3 ? 'Finding your location took too long' : 'Location isn\'t available here';
-      $('#locHelp').innerHTML = '<div class="err" style="margin-top:12px"><b>' + esc(title) + '.</b> You\'ll need to share it to sign. Here\'s how on your ' + esc(d.name) +
+      lastReason = { 1: 'permission denied', 2: 'position unavailable', 3: 'timed out', unsupported: 'not supported by this browser' }[code] || 'failed';
+      $('#locHelp').innerHTML = '<div class="err" style="margin-top:12px"><b>' + esc(title) + '.</b> We ask everyone signing to share their location. To turn it on for your ' + esc(d.name) +
         (d.browser !== 'your browser' ? ' (' + esc(d.browser) + ')' : '') + ':</div><ol class="small" style="padding-left:20px;line-height:1.5">' +
         fixSteps(d, code).map(function (s) { return '<li>' + s + '</li>'; }).join('') + '</ol>' +
-        '<p class="small muted">Stuck? Contact ' + esc(view.ownerName) + ' and they can help.</p>';
+        '<div class="card" style="margin:10px 0 0;padding:12px;border:1px solid #f59e0b;background:#fffbeb"><b>Can\'t or don\'t want to share it?</b> You can still sign. ' +
+        'The agreement\'s audit trail and signing certificate will record that you were asked and chose not to share your location.' +
+        '<div style="margin-top:8px"><button class="btn light small" id="skipLoc" type="button">Continue without sharing my location</button></div></div>';
+      $('#skipLoc').addEventListener('click', function () {
+        UI.busy($('#skipLoc'), true, 'Saving...');
+        ESignApi.signerCall('sign.location', { token: token, location: { declined: true, reason: lastReason } })
+          .then(function (v) { view = v; step = 'sign'; render(); })
+          .catch(function (e) { showError(e, $('#skipLoc')); });
+      });
     }
     btn.addEventListener('click', function () {
       if (!navigator.geolocation) return failed('unsupported');

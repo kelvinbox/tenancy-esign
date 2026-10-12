@@ -568,3 +568,34 @@ test('0.10.0: signers share their device location before signing; every attempt 
   assert.ok(cert.includes('Location when signing (reported by the device)'));
   assert.ok(cert.includes('maps.google.com/?q=-45.87412,170.50352'));
 });
+
+test('0.11.0: a signer can sign without sharing their location after being asked; the decline is audited and in the certificate', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  const t1 = b.tokenFrom(b.lastEmail('mia@example.com', 'invite'));
+  b.call({ action: 'sign.open', token: t1 });
+  b.call({ action: 'sign.consent', token: t1 });
+  b.call({ action: 'sign.location', token: t1, location: { error: { code: 1 } } });
+  const v = b.call({ action: 'sign.location', token: t1, location: { declined: true, reason: 'permission denied' } });
+  assert.equal(v.me.locationDeclined.reason, 'permission denied');
+  signAs(b, t1, { location: false });
+  const s = b.db.envelopes[id].signers[0];
+  assert.equal(s.status, 'Signed');
+  assert.equal(s.signature.location, null);
+  assert.equal(s.signature.locationDeclined.reason, 'permission denied');
+  const full = b.call({ action: 'admin.get', id });
+  const types = full.events.map(e => e.type);
+  assert.ok(types.indexOf('LOCATION_FAILED') < types.indexOf('LOCATION_DECLINED') && types.indexOf('LOCATION_DECLINED') < types.indexOf('SIGNED'));
+  assert.ok(full.events.find(e => e.type === 'LOCATION_DECLINED').text.includes('Chose to sign without sharing device location'));
+  const cert = ESign.renderCertificate(b.db.envelopes[id], b.db.audit[id], {});
+  assert.ok(cert.includes('chose to sign without sharing their device location (permission denied)'));
+  // sharing it afterwards replaces the decline
+  const b2 = memoryBackend();
+  b2.call({ action: 'admin.create', input: sampleInput() });
+  const t2 = b2.tokenFrom(b2.lastEmail('mia@example.com', 'invite'));
+  b2.call({ action: 'sign.consent', token: t2 });
+  b2.call({ action: 'sign.location', token: t2, location: { declined: true, reason: 'timed out' } });
+  const v2 = b2.call({ action: 'sign.location', token: t2, location: { lat: -45.9, lng: 170.5, accuracy: 30 } });
+  assert.equal(v2.me.locationDeclined, null);
+  assert.equal(v2.me.location.lat, -45.9);
+});

@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.10.0';
+  var VERSION = '0.11.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -976,6 +976,7 @@ var ESign = (function () {
     DOCUMENT_REVIEWED: 'Read the agreement to the end',
     LOCATION_CAPTURED: 'Device location shared for signing',
     LOCATION_FAILED: 'Device location not shared',
+    LOCATION_DECLINED: 'Chose to sign without sharing device location',
     SIGNED: 'Signed',
     DECLINED: 'Declined to sign',
     CANCELLED: 'Agreement cancelled',
@@ -1059,7 +1060,7 @@ var ESign = (function () {
       (env.parent ? kvRow('Changes', 'Version ' + esc(env.parent.version) + ' (' + esc(env.parent.id) + '), whose signed document has SHA-256 <span class="mono">' +
         esc(env.parent.finalSha256) + '</span>. This is version ' + esc(env.version) + ' of tenancy ' + esc(env.tenancyId) + '.') : '') +
       kvRow('Signing method', 'Personal link sent to each signer\'s email; email address verified with a one-time code before signing; ' +
-        'agreement to sign electronically recorded; agreement read to the end; device location shared before signing; drawn signature plus typed full name; signers signed in order, tenants first and the landlord\'s signer(s) last.') +
+        'agreement to sign electronically recorded; agreement read to the end; device location requested before signing (shared or declined, as recorded below); drawn signature plus typed full name; signers signed in order, tenants first and the landlord\'s signer(s) last.') +
       '</table>';
     h += '<h3>Fingerprints (SHA-256)</h3>';
     h += '<div class="fp"><b>Agreement terms</b> (locked when sent; every signer signed this exact version):<div class="mono">' + esc(env.termsHash) + '</div></div>';
@@ -1080,7 +1081,9 @@ var ESign = (function () {
         kvRow('Read to the end', esc(fmt(s.reviewedAt))) +
         kvRow('Signed', esc(fmt(s.signedAt))) +
         (sig.location ? kvRow('Location when signing (reported by the device)', esc(locationText(sig.location)) +
-          '<br><span class="muted">https://maps.google.com/?q=' + esc(Number(sig.location.lat).toFixed(5) + ',' + Number(sig.location.lng).toFixed(5)) + '</span>') : '') +
+          '<br><span class="muted">https://maps.google.com/?q=' + esc(Number(sig.location.lat).toFixed(5) + ',' + Number(sig.location.lng).toFixed(5)) + '</span>') :
+          sig.locationDeclined ? kvRow('Location when signing', 'Not shared. The signer was asked, then chose to sign without sharing their device location' +
+            (sig.locationDeclined.reason ? ' (' + esc(sig.locationDeclined.reason) + ')' : '') + '.') : '') +
         (sig.client ? kvRow('Device', esc(clientText(sig.client))) : '') +
         (sig.typedName ? kvRow('Typed name', esc(sig.typedName)) : '') +
         (sig.declaration ? kvRow('Declared (ticked separately)', esc(sig.declaration)) : '') +
@@ -1530,6 +1533,7 @@ var ESign = (function () {
           consentAt: s.consentAt || null, codeSentAt: s.otp ? s.otp.sentAt : null, verified: verified,
           verifiedAt: s.verifiedAt || null, reviewedAt: s.reviewedAt || null, signedAt: s.signedAt || null,
           location: s.location ? clone(s.location) : null,
+          locationDeclined: s.locationDeclined ? clone(s.locationDeclined) : null,
           details: clone(signerDetails(s))
         },
         isMyTurn: env.status === 'Sent' && !!cur && cur.id === s.id,
@@ -1944,6 +1948,12 @@ var ESign = (function () {
       var f = bySignerToken(token), env = f.env, s = f.signer;
       assertMyTurn(env, s);
       if (!s.consentAt) fail('Please agree to sign electronically first.');
+      if (p.declined) {   // asked, warned, and chose to go on without it
+        s.locationDeclined = { reason: str(p.reason).slice(0, 120) || 'not shared', at: iso() };
+        audit(env, 'LOCATION_DECLINED', actorOf(s), { signer: s.role, locationError: s.locationDeclined.reason }, client);
+        store.saveEnvelope(env);
+        return signerView(env, s);
+      }
       if (p.error) {
         var why = { 1: 'permission denied', 2: 'position unavailable', 3: 'timed out', unsupported: 'not supported by this browser' }[p.error.code] || 'failed';
         audit(env, 'LOCATION_FAILED', actorOf(s), { signer: s.role, locationError: why + (p.error.message ? ': ' + str(p.error.message).slice(0, 120) : '') }, client);
@@ -1956,6 +1966,7 @@ var ESign = (function () {
         lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6, accuracy: isFinite(acc) && acc >= 0 ? Math.round(acc) : null,
         deviceTime: str(p.at).slice(0, 40) || null, recordedAt: iso()
       };
+      delete s.locationDeclined;
       audit(env, 'LOCATION_CAPTURED', actorOf(s), { signer: s.role, location: clone(s.location) }, client);
       store.saveEnvelope(env);
       return signerView(env, s);
@@ -1974,7 +1985,7 @@ var ESign = (function () {
       }
       if (!s.reviewedAt) fail('Please read the agreement to the end first.');
       if (str(p.termsHash) !== env.termsHash) fail('The agreement has changed since you opened it. Please reload the page.', 'STALE');
-      if (!s.location) fail('Please share your location before signing.', 'LOCATION');
+      if (!s.location && !s.locationDeclined) fail('Please share your location, or choose to sign without it.', 'LOCATION');
       if (p.agree !== true) fail('Please tick the box to confirm you agree.');
       var declaration = needsDeclaration(env, s) ? declarationText(env) : '';
       if (declaration && p.declare !== true) fail('Please tick the box to declare that the statements in section 4 are true and correct.');
@@ -2007,13 +2018,15 @@ var ESign = (function () {
         signedAt: signedAt,
         strokes: { count: Number(strokes.count) || 0, points: Number(strokes.points) || 0, ms: Number(strokes.ms) || 0 },
         statement: agreeTextFor(env, s),
-        location: clone(s.location),
+        location: s.location ? clone(s.location) : null,
         client: cleanClient(client)
       };
+      if (!s.location && s.locationDeclined) sig.locationDeclined = clone(s.locationDeclined);
       var rec = {
         agreementId: env.id, role: s.role, email: s.email, termsHash: sig.termsHash, detailsHash: detailsHash,
         imageSha256: sig.imageSha256, typedName: typed, signedAt: signedAt, statement: agreeTextFor(env, s), location: sig.location
       };
+      if (sig.locationDeclined) rec.locationDeclined = sig.locationDeclined;
       if (declaration) { sig.declaration = declaration; rec.declaration = declaration; }
       sig.recordHash = hashOf(rec);
       s.details = details;
@@ -2025,7 +2038,7 @@ var ESign = (function () {
       audit(env, 'SIGNED', actorOf(s), {
         signer: s.role, name: details.name, typedName: typed, statement: agreeTextFor(env, s),
         termsHash: env.termsHash, detailsHash: detailsHash, signatureSha256: img.sha256, recordHash: sig.recordHash,
-        strokes: sig.strokes, location: sig.location
+        strokes: sig.strokes, location: sig.location, locationDeclined: sig.locationDeclined || null
       }, client);
 
       var next = currentSigner(env);
