@@ -41,6 +41,8 @@ button { touch-action: manipulation; }
   display: flex; align-items: center; gap: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.12);
 }
 .hdr h1 { font-size: 18px; margin: 0; line-height: 1.2; }
+.hdr .hdr-logo { background: #fff; border-radius: 10px; padding: 4px 8px; line-height: 0; flex: none; }
+.hdr .hdr-logo img { max-height: 44px; max-width: 150px; }
 .hdr .sub { font-size: 13px; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hdr .grow { flex: 1; min-width: 0; }
 .hdr .back { background: rgba(255,255,255,.18); border: 0; color: #fff; width: 38px; height: 38px; border-radius: 10px; font-size: 20px; }

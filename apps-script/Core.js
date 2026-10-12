@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.6.1';
+  var VERSION = '0.7.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -1469,6 +1469,7 @@ var ESign = (function () {
       return {
         app: cfg.appName || 'Tenancy e-sign',
         ownerName: senderName(env),
+        brand: env.branding && env.branding.logo ? { logo: env.branding.logo, name: env.branding.displayName || env.landlord.name } : null,
         agreement: {
           id: env.id, title: env.title, status: env.status, propertyAddress: env.propertyAddress,
           expiresAt: env.expiresAt, completedAt: env.completedAt || null, finalAvailable: !!env.final,

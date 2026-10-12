@@ -63,8 +63,19 @@
 
   /* ---------- rendering ---------- */
 
+  /** The landlord's logo (when they've uploaded one) replaces the pen icon in the header. */
+  function showLogo() {
+    var b = view && view.brand, tile = document.querySelector('.hdr .tile');
+    if (!b || !b.logo || !tile || tile.getAttribute('data-logo')) return;
+    tile.setAttribute('data-logo', '1');
+    tile.className = 'hdr-logo';
+    tile.removeAttribute('style');
+    tile.innerHTML = '<img alt="' + esc(b.name || '') + '" src="' + esc(b.logo) + '">';
+  }
+
   function render() {
     window.scrollTo(0, 0);
+    showLogo();
     var a = view.agreement, me = view.me;
     if (me.status === 'Signed') return renderDone();
     if (a.status === 'Cancelled') return renderClosed('&#128683;', 'This agreement was cancelled', view.ownerName + ' cancelled this agreement, so it can\'t be signed. If a new version is needed, you\'ll get a new link.');

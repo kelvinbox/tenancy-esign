@@ -505,3 +505,14 @@ test('template 1.6.0: insulation and healthy homes statements are label/value ta
   const plain = b.call({ action: 'admin.preview', input: sampleInput() }).html;
   assert.ok(plain.indexOf('<p>Ceiling: 190mm') > 0 || plain.indexOf('<th>Ceiling</th>') > 0);
 });
+
+test('0.7.0: the signing page gets the landlord logo for its header (only when a logo was uploaded)', () => {
+  const b = memoryBackend();
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  b.call({ action: 'admin.create', input: sampleInput({ branding: { style: 'modern', logo: png, displayName: 'Box Rentals' } }) });
+  const v = b.call({ action: 'sign.open', token: b.tokenFrom(b.lastEmail('mia@example.com', 'invite')) });
+  assert.deepEqual(v.brand, { logo: png, name: 'Box Rentals' });
+  const b2 = memoryBackend();
+  b2.call({ action: 'admin.create', input: sampleInput({ branding: { style: 'modern' } }) });
+  assert.equal(b2.call({ action: 'sign.open', token: b2.tokenFrom(b2.lastEmail('mia@example.com', 'invite')) }).brand, null);
+});
