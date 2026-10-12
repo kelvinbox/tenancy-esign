@@ -207,6 +207,7 @@ function esignBuildAgreementInput_(ctx) {
     },
     landlordSigners: esignLandlordSigners_(L),
     branding: L.branding || null,   // how the agreement and its emails look (frozen with it when sent; not part of the terms)
+    test: ctx.test === true,        // from the test suite: marked as a test, and can be signed automatically
     terms: {
       rentPerWeek: String(d.rentPerWeek !== undefined ? d.rentPerWeek : p.rent),
       bond: String(d.bond !== undefined ? d.bond : p.bond),
@@ -359,6 +360,11 @@ function esignRefreshAgreement_(stored) {
   var a = full.agreement;
   a.terms = full.terms;
   return { agreement: esignAgreementRecord_(a, stored), full: a, completed: a.status === 'Completed' };
+}
+
+/** Test agreements only: the next person signs automatically (the Tenant Management test suite). */
+function esignTestSign_(stored) {
+  return esignCall_('admin.testSign', { id: stored.requestId }, 'test suite');
 }
 
 function esignCancelAgreement_(stored, reason, actor) {

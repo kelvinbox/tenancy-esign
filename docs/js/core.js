@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.12.0';
+  var VERSION = '0.13.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -266,7 +266,8 @@ var ESign = (function () {
       terms: {},
       tenants: [],
       source: input.source ? clone(input.source) : null,
-      branding: cleanBranding(input.branding, warnings)
+      branding: cleanBranding(input.branding, warnings),
+      test: input.test === true   // sent by the Tenant Management test suite: marked as a test, and can be signed automatically
     };
 
     // Up to 2 people sign for the landlord (e.g. co-owners or two trustees). Older callers send a
@@ -673,6 +674,9 @@ var ESign = (function () {
       '</div><table class="kv">' + rows + '</table></div>';
   }
 
+  /** A small drawn signature used only by the test suite (admin.testSign). */
+  var TEST_SIGNATURE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUAAAABaCAYAAADJqo/jAAADAUlEQVR42u3d21EDMQwF0BTBN5XQf1tQAZOsLdmSfc7M/sJGyNePTcLrBQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMODr++f3v0t1gCvDTwgCV4efEMyrs8pAwUFpwFpdw3WD06plzwpbpaBQ+AnBtccLagobB+foVhmr6+qTjeowtPozYHMnGPVct9JWJYZWfwZs7gSjpo4YaBB+VoJrV9cqOdeL+pSUAHzaXLc1YtTqWqfOTxoCkLSGeLr9uCEIZ16fweqIgQarPyG49nhB1zpioGgACsH4QWag5tRZXTVOmQY4MQQzjxZ0ryOGd69JdzScAU9pyujXIQRzamLC1TzlinViAJoYegSgCVcA+mMWvf8Tmjzq3Df73Qsn1FTKNV5lndSQu8K12oOmqAdgGa/DhCv83GeDZvwkNCo+cY96J4DVddH77lQ4Adi7GaPeZrSqvhmBnXHfmZ+IyqhvqdDuMlC7zXSd73VHqHwy+FYGYMRHJFeFSvSZZIfAtqqyWm09sVQ7S4v4HdVWqxkr8uMWMgLw3nvufAi9coXy9GdXmlRGJ5+sECzZb9UHwCmDdOe28qTwe3moMLxtfxpskSFYtrbeWtJ3hdXhYUKn+p7+fsVdRw6l+82nK/rdf5cnqZ1C8ORPV+x+A3f5ula9QauUZw0+uzU+YcDf2mvZf/uob68RgJfPyOpSr0/UNKdOberaIQBvX6EYqDl1UdP5leURta3+PXu3b9MM1DUBqJoxIdiuXysHoHMqAzUjBE0qOSHYsq5VbtphvYG6qsZqGh+CrR+47b7pm/7R0FFP0RrWWF3XheAVZymzRfGvJg3SVXVW1zUheNVWrdNXHXUJQQM1vs5qypKVivCbm2AMVOdTNFgFzm5zb2tIWzTnUxw6SDVVzhZNTeODUGUYbhzhZ4sGBqqBaosGBikZ9VUhKL4dBgAAAAAAAAAAgA9kfOGIDzqAQHAJQASCyyUABYLLJYgQRC6BAAJQIACeXgEAAAAAAAAAAAAAAAAw6g/20VSp9JnzxgAAAABJRU5ErkJggg==';
+
   /* ---------- Landlord branding ---------- */
   var BRAND_DEFAULT = { classic: '#1f3a5f', modern: '#0f766e' };   // navy, teal
   var LOGO_MAX = 150000;   // characters of data URI (Tenant Management shrinks logos well under this)
@@ -948,7 +952,8 @@ var ESign = (function () {
       subtitle: tpl.subtitle,
       intro: fillText(tpl.intro, f, opts.mode),
       keyDetails: env.kind === 'variation' ? '' : renderKeyDetails(env, f, opts.mode),
-      brand: renderBrandHeader(env),
+      brand: (env.test ? '<div style="border:2px dashed #b91c1c;color:#b91c1c;padding:6px 10px;margin:0 0 10px;font-weight:700;font-family:Arial,Helvetica,sans-serif">' +
+        'TEST AGREEMENT: created by the Tenant Management test suite. Not a real tenancy agreement.</div>' : '') + renderBrandHeader(env),
       footer: renderBrandFooter(env),
       sections: tpl.sections.map(function (sec) {
         // clauses are numbered from the heading's number: "6. The tenant agrees to" gives 6.1, 6.2 ...
@@ -1000,6 +1005,7 @@ var ESign = (function () {
     if (d.secondsOnPage) extra.push(d.secondsOnPage + 's on page');
     if (d.attemptsLeft !== undefined) extra.push(d.attemptsLeft + ' attempts left');
     if (d.variationId) extra.push(d.variationId + (d.version ? ', version ' + d.version : '') + (d.outcome ? ', ' + d.outcome.toLowerCase() : ''));
+    if (d.method && d.method.indexOf('one-time code') < 0) extra.push(d.method);   // e.g. the test suite
     if (d.location) extra.push(locationText(d.location));
     if (d.locationError) extra.push(d.locationError);
     if (d.sha256) extra.push('SHA-256 ' + d.sha256);
@@ -1055,6 +1061,7 @@ var ESign = (function () {
     h += '<table class="kv">' +
       kvRow('Agreement', esc(env.title) + ' <span class="muted">(' + esc(env.id) + ')</span>') +
       kvRow('Status', esc(env.status) + (env.completedAt ? ' on ' + esc(fmt(env.completedAt)) : '')) +
+      (env.test ? kvRow('Test', '<b>This is a test agreement.</b> It was sent and signed automatically by the Tenant Management test suite, not by real people.') : '') +
       kvRow('Created', esc(fmt(env.createdAt)) + ' by ' + esc(env.createdBy || 'landlord')) +
       kvRow('Template', esc(env.template.title) + ' v' + esc(env.template.version) + ' (' + esc(env.template.id) + ')') +
       (env.parent ? kvRow('Changes', 'Version ' + esc(env.parent.version) + ' (' + esc(env.parent.id) + '), whose signed document has SHA-256 <span class="mono">' +
@@ -1353,6 +1360,7 @@ var ESign = (function () {
     }
 
     function mail(env, m) {
+      if (env && env.test && m.subject && m.subject.indexOf('[TEST] ') !== 0) m.subject = '[TEST] ' + m.subject;
       var b = env && env.branding;
       if (b && m.html) {
         m.html = brandEmailHeader(env) + m.html.split('#0f766e').join(b.colour);
@@ -1523,7 +1531,8 @@ var ESign = (function () {
         change: env.change ? clone(env.change) : null,
         tenants: env.status === 'Completed' ? currentTenants(env) : null,
         final: env.final ? { sha256: env.final.sha256, name: env.final.name, url: env.final.url || null } : null,
-        signers: env.signers.map(signerSummary)
+        signers: env.signers.map(signerSummary),
+        test: !!env.test
       };
     }
 
@@ -1662,6 +1671,7 @@ var ESign = (function () {
         landlord: v.landlord,
         terms: v.terms,
         branding: v.branding,   // how it looks: frozen with the agreement, not part of the locked terms
+        test: v.test || undefined,
         source: v.source,
         signers: [],
         auditCount: 0,
@@ -1738,6 +1748,7 @@ var ESign = (function () {
         templateHash: hashOf(tpl),
         landlord: clone(parent.landlord),
         terms: clone(parent.terms),
+        test: parent.test || undefined,   // a change to a test tenancy is a test too
         // the landlord's current look if Tenant Management sends it, else the original agreement's
         branding: input && input.branding ? cleanBranding(input.branding, []) : (parent.branding ? clone(parent.branding) : null),
         source: parent.source ? clone(parent.source) : null,
@@ -1987,6 +1998,49 @@ var ESign = (function () {
       audit(env, 'LOCATION_CAPTURED', actorOf(s), { signer: s.role, location: clone(s.location) }, client);
       store.saveEnvelope(env);
       return signerView(env, s);
+    }
+
+    /**
+     * Test agreements only: the next person who can sign goes through every step (link, consent, verified without an
+     * email code, read, location, details, signature), each recorded in the audit trail as done by the test suite.
+     */
+    function testSign(id) {
+      var env = loadEnv(id);
+      if (!env.test) fail('Only test agreements (sent by the Tenant Management test suite) can be signed automatically.', 'NOT_TEST');
+      if (env.status !== 'Sent') fail('This agreement is ' + String(env.status).toLowerCase() + ', so there is no one to sign.');
+      var s = currentStage(env)[0];
+      if (!s) fail('No one is waiting to sign.');
+      var client = { ua: 'Tenant Management test suite', tz: 'Pacific/Auckland', ip: '0.0.0.0', platform: 'test' };
+      var token = issueToken(env, s).split('t=').pop();   // issueToken gives the whole link
+      if (s.status === 'Waiting') s.status = 'Sent';
+      if (!s.sentAt) s.sentAt = iso();
+      audit(env, 'LINK_ISSUED', 'test suite', { signer: s.role, channel: 'test suite' });
+      store.saveEnvelope(env);
+      open(token, client);
+      consent(token, client);
+      var f = bySignerToken(token);
+      f.signer.verifiedAt = iso(); f.signer.otp = null;
+      audit(f.env, 'IDENTITY_VERIFIED', actorOf(f.signer), { signer: f.signer.role, method: 'test suite (no email code: test agreement)' }, client);
+      store.saveEnvelope(f.env);
+      reviewed(token, { termsHash: f.env.termsHash, secondsOnPage: 1 }, client);
+      location(token, { lat: -45.87412, lng: 170.50351, accuracy: 15, at: iso() }, client);
+      var cur = bySignerToken(token), me = cur.signer, d = clone(signerDetails(me));
+      if (me.kind === 'landlord') d.capacity = d.capacity || 'Landlord';
+      else {
+        d.mobile = d.mobile || '021 555 0100';
+        if (me.kind !== 'continuing') d.addressForService = d.addressForService || (me.kind === 'outgoing' ? '1 Forwarding Road, Dunedin' : env.propertyAddress);
+        if (me.kind === 'tenant' || me.kind === 'incoming') {
+          d.idType = d.idType || 'Driver licence'; d.idNumber = d.idNumber || 'TS' + String(100000 + Math.floor(Math.random() * 899999));
+          d.dob = d.dob || '1995-06-15';
+        }
+      }
+      submit(token, {
+        details: d, typedName: d.name, agree: true, declare: needsDeclaration(cur.env, me), termsHash: cur.env.termsHash,
+        signaturePng: TEST_SIGNATURE, strokes: { count: 3, points: 140, ms: 1800 }, submissionId: 'test-' + me.id + '-' + Date.now()
+      }, client);
+      var after = loadEnv(id);
+      return { signed: d.name, role: roleLabel(me.role), status: after.status,
+               remaining: after.signers.filter(function (x) { return x.status !== 'Signed'; }).map(function (x) { return signerDetails(x).name; }) };
     }
 
     function submit(token, p, client) {
@@ -2260,6 +2314,7 @@ var ESign = (function () {
       open: open,
       consent: consent,
       location: location,
+      testSign: testSign,
       sendCode: sendCode,
       verifyCode: verifyCode,
       reviewed: reviewed,
@@ -2312,6 +2367,7 @@ var ESign = (function () {
       case 'admin.previewVariation': return engine.previewVariation(req.input);
       case 'admin.createVariation': return engine.createVariation(req.input, actor);
       case 'admin.summary': return engine.tenancySummary(req.id);
+      case 'admin.testSign': return engine.testSign(req.id);
       default: var e3 = new Error('Unknown action: ' + action); e3.code = 'BAD_REQUEST'; throw e3;
     }
   }

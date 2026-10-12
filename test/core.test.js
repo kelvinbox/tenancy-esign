@@ -628,3 +628,30 @@ test('0.12.0: the landlord opening their link early is told to wait for the tena
   assert.ok(html.includes('the tenants first, in any order, and then the landlord'));
   assert.equal(env.template.version, '1.7.0');
 });
+
+test('0.13.0: test agreements are marked as tests and can be signed automatically; real ones never', () => {
+  const b = memoryBackend();
+  const real = b.call({ action: 'admin.create', input: sampleInput() }).agreement;
+  assert.throws(() => b.call({ action: 'admin.testSign', id: real.id }), /Only test agreements/);
+  const t = b.call({ action: 'admin.create', input: sampleInput({ test: true }) }).agreement;
+  assert.equal(t.test, true);
+  assert.ok(b.lastEmail('mia@example.com', 'invite').subject.indexOf('[TEST] ') === 0, 'test emails are labelled');
+  const r1 = b.call({ action: 'admin.testSign', id: t.id });
+  assert.equal(r1.status, 'Sent'); assert.equal(r1.signed, 'Mia Example');
+  const r2 = b.call({ action: 'admin.testSign', id: t.id });
+  assert.ok(/Sample$/.test(r2.signed));
+  const r3 = b.call({ action: 'admin.testSign', id: t.id });
+  assert.equal(r3.status, 'Completed'); assert.deepEqual(r3.remaining, []);
+  const full = b.call({ action: 'admin.get', id: t.id });
+  assert.equal(full.chain.ok, true);
+  assert.ok(full.events.some(e => e.type === 'IDENTITY_VERIFIED' && /test suite/.test(e.text)));
+  assert.ok(full.events.filter(e => e.type === 'SIGNED').length === 3);
+  const html = Object.values(b.db.finals).slice(-1)[0];
+  assert.ok(html.includes('TEST AGREEMENT') && html.includes('This is a test agreement.'));
+  // a change of tenants on a test tenancy is a test too, and can be completed the same way
+  const v = b.call({ action: 'admin.createVariation', input: { parentId: t.id, effectiveDate: '2026-12-01', add: [{ name: 'Cara Test', email: 'cara@example.com', mobile: '021 555 0103', idType: 'Driver licence', idNumber: 'DC1', dob: '2000-02-14', ref: 'KB-9' }], bondArrangement: 'Test.' } }).agreement;
+  assert.equal(v.test, true);
+  let last; for (let i = 0; i < 5; i++) { last = b.call({ action: 'admin.testSign', id: v.id }); if (last.status === 'Completed') break; }
+  assert.equal(last.status, 'Completed');
+  assert.equal(b.call({ action: 'admin.get', id: v.id }).agreement.tenants.length, 3);
+});
