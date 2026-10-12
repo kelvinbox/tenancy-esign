@@ -82,7 +82,7 @@
     if (a.status === 'Declined') return renderClosed('&#9995;', 'This agreement was declined', 'Someone declined to sign this agreement, so it can\'t be signed. ' + view.ownerName + ' will be in touch.');
     if (a.status === 'Expired') return renderClosed('&#8987;', 'This link has expired', 'Ask ' + view.ownerName + ' to send the agreement again.');
     if (view.waitingFor) {
-      return renderClosed('&#9203;', 'It\'s not your turn yet', 'Everyone signs one after another. We\'re waiting for ' + view.waitingFor.name + ' (' + view.waitingFor.roleLabel + '). We\'ll email you when it\'s your turn.', true);
+      return renderClosed('&#9203;', 'It\'s not your turn yet', 'The tenants sign first, then the landlord. We\'re waiting for ' + view.waitingFor.names + ' to sign. We\'ll email you when it\'s your turn.', true);
     }
     ({ start: renderStart, verify: renderVerify, read: renderRead, details: renderDetails, locate: renderLocate, sign: renderSign })[step]();
   }
@@ -111,7 +111,7 @@
           ' The rest of the agreement stays the same.') + '</div>' : '') +
       '<p class="muted small">It takes about 5 minutes. You\'ll check it\'s you with a code sent to your email, read the ' +
       (view.agreement.kind === 'variation' ? 'change' : 'agreement') + ', confirm your details, share your location (your phone will ask), then sign with your finger.</p></div>' +
-      '<div class="card"><h2>Signing order</h2><p class="small muted">Everyone signs one after another. The landlord signs last.</p>' + signersList() + '</div>' +
+      '<div class="card"><h2>Who signs</h2><p class="small muted">All the tenants sign, in any order. Once they have, the landlord signs last.</p>' + signersList() + '</div>' +
       '<div class="card"><h2>Signing electronically</h2>' +
       '<label class="check" id="consentBox"><input type="checkbox" id="consent"><span>' + esc(view.consentText) + '</span></label>' +
       '<button class="btn link small" id="declineBtn" type="button">I don\'t want to sign this</button></div>';
@@ -476,7 +476,7 @@
       '<div class="card"><h2>' + (complete ? 'Everyone has signed' : 'What happens next') + '</h2>' +
       (complete ? '<p>The agreement is complete. A copy has been emailed to everyone with its signing certificate.</p>' +
         (a.finalSha256 ? '<p class="small muted">Document fingerprint (SHA-256):<br><span class="mono">' + esc(a.finalSha256) + '</span></p>' : '') :
-        '<p>The others will now sign in order. When everyone has signed, you\'ll get an email with the signed agreement and its signing certificate.</p>') +
+        '<p>Once everyone else has signed (the landlord signs after all the tenants), you\'ll get an email with the signed agreement and its signing certificate.</p>') +
       signersList() + '</div>';
     if (complete) {
       setBar('<button class="btn block" id="dl">&#11015;&#65039; Download signed copy</button>');

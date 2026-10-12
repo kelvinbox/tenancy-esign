@@ -553,7 +553,7 @@
       inp('terms.pets', 'Pets', { placeholder: 'No pets are allowed without the landlord\'s written consent.' }) +
       inp('terms.additionalTerms', 'Other terms (optional)', { type: 'textarea', rows: 2 }) + '</div>';
 
-    h += '<div class="card"><h2>&#128101; Tenants, in signing order</h2><p class="small muted">Tenant 1 signs first, then the others in order. The landlord signer(s) sign last. Each person needs their own email.</p>';
+    h += '<div class="card"><h2>&#128101; Tenants</h2><p class="small muted">All the tenants are sent their links at once and can sign in any order. The landlord signer(s) sign once every tenant has signed. Each person needs their own email.</p>';
     form.tenants.forEach(function (t, i) {
       h += '<div class="party" style="background:#f8fafb;border-radius:12px;padding:12px;margin-bottom:10px"><div class="row" style="margin-bottom:6px"><b class="grow">Tenant ' + (i + 1) + '</b>' +
         (i > 0 ? '<button class="btn small ghost" data-up="' + i + '" type="button" aria-label="Move up">&#8593;</button>' : '') +

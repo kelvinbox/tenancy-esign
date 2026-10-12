@@ -82,7 +82,7 @@ test('send, check status, complete, create the tenancy', () => {
   assert.equal(sent.agreement.provider, 'esign');
   assert.equal(sent.agreement.status, 'Sent');
   assert.equal(sent.agreement.signed, '0/4');
-  assert.deepEqual(sent.agreement.signers.map(s => s.status), ['Sent', 'Waiting', 'Waiting', 'Waiting']);
+  assert.deepEqual(sent.agreement.signers.map(s => s.status), ['Sent', 'Sent', 'Waiting', 'Waiting'], 'both tenants at once; the landlords wait');
 
   ['mia@example.com', 'tui@example.net', 'sam@example.com', 'pat@example.com'].forEach(e => signAs(tm.b, inviteToken(tm.b, e)));
   const r = tm.run('esignRefreshAgreement_', sent.agreement);

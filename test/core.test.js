@@ -48,18 +48,19 @@ test('validation: bond limit, duplicate emails, tenant count, occupants warning'
   assert.equal(r.value.tenants[0].under18, 'No');
 });
 
-test('full signing flow: in order, landlord last, chain intact, document fingerprinted', () => {
+test('full signing flow: tenants together, landlord last, chain intact, document fingerprinted', () => {
   const b = memoryBackend();
   const res = b.call({ action: 'admin.create', input: sampleInput(), actor: 'Sam' });
   const id = res.agreement.id;
   assert.equal(res.agreement.progress, '0/3');
 
-  // Only Tenant 1 is invited at first.
+  // Every tenant is invited straight away; the landlord waits for them.
   assert.ok(b.lastEmail('mia@example.com', 'invite'));
-  assert.equal(b.lastEmail('tui@example.net', 'invite'), undefined);
+  assert.ok(b.lastEmail('tui@example.net', 'invite'), 'Tenant 2 invited at the same time');
+  assert.equal(b.lastEmail('landlord@example.com', 'invite'), undefined, 'landlord not yet');
 
   signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
-  assert.ok(b.lastEmail('tui@example.net', 'invite'), 'Tenant 2 invited after Tenant 1 signs');
+  assert.equal(b.lastEmail('landlord@example.com', 'invite'), undefined, 'landlord still waits for Tenant 2');
   assert.ok(b.lastEmail('owner@example.com', 'notice'));
 
   signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')), { typedName: 'tui SAMPLE' }); // macron-insensitive match
@@ -97,7 +98,7 @@ test('full signing flow: in order, landlord last, chain intact, document fingerp
   full.signers.forEach(s => assert.ok(s.signature.recordHash));
 });
 
-test('two landlord signers sign after the tenants, in order', () => {
+test('two landlord signers sign after all the tenants, at the same time', () => {
   const b = memoryBackend();
   const input = sampleInput({
     landlordSigners: [
@@ -110,14 +111,19 @@ test('two landlord signers sign after the tenants, in order', () => {
   assert.deepEqual(res.agreement.signers.map(s => s.role), ['Tenant1', 'Tenant2', 'Landlord1', 'Landlord2']);
   assert.equal(res.agreement.progress, '0/4');
 
-  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  // tenants in either order; the landlords only after both
   signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')));
-  assert.equal(b.lastEmail('pat@example.com', 'invite'), undefined, 'second landlord waits for the first');
-  const v1 = signAs(b, b.tokenFrom(b.lastEmail('sam@example.com', 'invite')), { details: { capacity: 'Trustee' } });
-  assert.equal(v1.agreement.status, 'Sent');
-  assert.equal(v1.me.roleLabel, 'Landlord 1');
+  assert.equal(b.lastEmail('sam@example.com', 'invite'), undefined, 'landlords wait for every tenant');
+  const early = b.call({ action: 'admin.get', id }).signers.find(s => s.role === 'Landlord1');
+  assert.equal(early.status, 'Waiting');
+  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  assert.ok(b.lastEmail('sam@example.com', 'invite') && b.lastEmail('pat@example.com', 'invite'), 'both landlords invited together');
+  // either landlord can go first
   const v2 = signAs(b, b.tokenFrom(b.lastEmail('pat@example.com', 'invite')), { details: { capacity: 'Trustee' } });
-  assert.equal(v2.agreement.status, 'Completed');
+  assert.equal(v2.agreement.status, 'Sent');
+  assert.equal(v2.me.roleLabel, 'Landlord 2');
+  const v1 = signAs(b, b.tokenFrom(b.lastEmail('sam@example.com', 'invite')), { details: { capacity: 'Trustee' } });
+  assert.equal(v1.agreement.status, 'Completed');
 
   const html = Object.values(b.db.finals)[0];
   assert.ok(html.includes('Trustee &ndash; for Example Family Trust'));
@@ -187,9 +193,10 @@ test('signing rules: order, wrong codes, stale terms, name match, re-verificatio
   b.advance(31 * 60000);
   assert.throws(() => b.call({ action: 'sign.submit', token: t1, payload }), /verify your email again/);
 
-  // Tenant 2 has no link yet, and the landlord can't jump the queue.
+  // Tenant 2 can be sent a new link any time; the landlord can't jump ahead of the tenants.
+  assert.ok(b.call({ action: 'admin.issueLink', id: view.agreement.id, signerId: 'T2', channel: 'copy' }).link);
   const landlordLinkAttempt = () => b.call({ action: 'admin.issueLink', id: view.agreement.id, signerId: 'L', channel: 'copy' });
-  assert.throws(landlordLinkAttempt, /whose turn it is/);
+  assert.throws(landlordLinkAttempt, /once all the tenants have signed/);
 });
 
 test('submit is idempotent for retries with the same submission id', () => {
@@ -475,7 +482,7 @@ test('0.5.0 branding is frozen with the agreement, outside the terms fingerprint
   const inv = b.db.outbox.filter(m => m.kind === 'invite')[0];
   assert.equal(inv.fromName, 'Box Rentals');
   assert.ok(inv.html.indexOf('Box Rentals') > 0 && inv.html.indexOf('background:#7c3aed') > 0 && inv.html.indexOf('#0f766e') < 0, 'letterhead and button in the colour');
-  const plainInv = b.db.outbox.filter(m => m.kind === 'invite')[1];
+  const plainInv = b.db.outbox.filter(m => m.kind === 'invite' && m.to === 'mia@example.com')[1];
   assert.equal(plainInv.fromName, undefined);
   const v = b.call({ action: 'sign.open', token: b.tokenFrom(inv) });
   assert.ok(v.document.brand.indexOf('Box Rentals') > 0, 'signing page shows the letterhead');
@@ -598,4 +605,26 @@ test('0.11.0: a signer can sign without sharing their location after being asked
   const v2 = b2.call({ action: 'sign.location', token: t2, location: { lat: -45.9, lng: 170.5, accuracy: 30 } });
   assert.equal(v2.me.locationDeclined, null);
   assert.equal(v2.me.location.lat, -45.9);
+});
+
+test('0.12.0: the landlord opening their link early is told to wait for the tenants; owner notices say who is still to sign', () => {
+  const b = memoryBackend({ ownerEmail: 'owner@example.com' });
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  // the landlord has no link yet; give them one directly to check the waiting page
+  const env = b.db.envelopes[id];
+  assert.throws(() => b.call({ action: 'admin.issueLink', id, signerId: 'L', channel: 'copy' }), /Mia Example and T/);
+  signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')));
+  const notice = b.db.outbox.filter(m => m.kind === 'notice').slice(-1)[0];
+  assert.ok(/Still to sign: Mia Example/.test(notice.text));
+  assert.equal(b.db.envelopes[id].signers.find(s => s.id === 'L').status, 'Waiting');
+  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  const n2 = b.db.outbox.filter(m => m.kind === 'notice').slice(-1)[0];
+  assert.ok(/landlord has been sent their link/.test(n2.text));
+  const lv = b.call({ action: 'sign.open', token: b.tokenFrom(b.lastEmail('landlord@example.com', 'invite')) });
+  assert.equal(lv.isMyTurn, true);
+  assert.equal(lv.waitingFor, null);
+  // the wording in the agreement and certificate
+  const html = b.call({ action: 'admin.progress', id }).html;
+  assert.ok(html.includes('the tenants first, in any order, and then the landlord'));
+  assert.equal(env.template.version, '1.7.0');
 });

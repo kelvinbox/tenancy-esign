@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.11.1';
+  var VERSION = '0.12.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -1061,7 +1061,7 @@ var ESign = (function () {
       (env.parent ? kvRow('Changes', 'Version ' + esc(env.parent.version) + ' (' + esc(env.parent.id) + '), whose signed document has SHA-256 <span class="mono">' +
         esc(env.parent.finalSha256) + '</span>. This is version ' + esc(env.version) + ' of tenancy ' + esc(env.tenancyId) + '.') : '') +
       kvRow('Signing method', 'Personal link sent to each signer\'s email; email address verified with a one-time code before signing; ' +
-        'agreement to sign electronically recorded; agreement read to the end; device location requested before signing (shared or declined, as recorded below); drawn signature plus typed full name; signers signed in order, tenants first and the landlord\'s signer(s) last.') +
+        'agreement to sign electronically recorded; agreement read to the end; device location requested before signing (shared or declined, as recorded below); drawn signature plus typed full name; all the tenants signed first, in any order, then the landlord\'s signer(s).') +
       '</table>';
     h += '<h3>Fingerprints (SHA-256)</h3>';
     h += '<div class="fp"><b>Agreement terms</b> (locked when sent; every signer signed this exact version):<div class="mono">' + esc(env.termsHash) + '</div></div>';
@@ -1137,7 +1137,7 @@ var ESign = (function () {
     var done = env.signers.filter(function (s) { return s.status === 'Signed'; }).length;
     var rows = env.signers.map(function (s) {
       var d = signerDetails(s), when = s.signedAt ? 'Signed ' + fmt(s.signedAt) : s.reviewedAt ? 'Read it ' + fmt(s.reviewedAt) + ', not signed yet' :
-        s.openedAt ? 'Opened ' + fmt(s.openedAt) + ', not signed yet' : s.sentAt ? 'Sent ' + fmt(s.sentAt) + ', not opened yet' : 'Waiting for the people before them';
+        s.openedAt ? 'Opened ' + fmt(s.openedAt) + ', not signed yet' : s.sentAt ? 'Sent ' + fmt(s.sentAt) + ', not opened yet' : (s.kind === 'landlord' ? 'Waiting for all the tenants to sign' : 'Not sent yet');
       return '<tr><th>' + esc(roleLabel(s.role)) + '</th><td>' + esc(d.name) + '</td><td>' + esc(s.status === 'Declined' ? 'Declined' : when) + '</td></tr>';
     }).join('');
     var banner = '<div style="border:2px solid #b45309;background:#fffbeb;color:#78350f;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:13px">' +
@@ -1417,9 +1417,29 @@ var ESign = (function () {
       return base + (base.indexOf('?') >= 0 ? '&' : '?') + 't=' + token;
     }
 
-    function currentSigner(env) {
-      for (var i = 0; i < env.signers.length; i++) if (env.signers[i].status !== 'Signed') return env.signers[i];
-      return null;
+    /**
+     * Who can sign now. Every tenant (for a change of tenants: joining, continuing and leaving) signs at the same time, in
+     * any order; once they all have, the landlord's signer(s) sign, also at the same time.
+     */
+    function currentStage(env) {
+      var tenants = env.signers.filter(function (x) { return x.kind !== 'landlord' && x.status !== 'Signed'; });
+      return tenants.length ? tenants : env.signers.filter(function (x) { return x.kind === 'landlord' && x.status !== 'Signed'; });
+    }
+    function canSignNow(env, s) { return currentStage(env).some(function (x) { return x.id === s.id; }); }
+    function nameList(list) {
+      var n = list.map(function (x) { return signerDetails(x).name; });
+      return n.length > 1 ? n.slice(0, -1).join(', ') + ' and ' + n[n.length - 1] : (n[0] || '');
+    }
+    /** Emails a link to everyone in the current stage who hasn't been sent one yet. Returns [{signer, emailed, link}]. */
+    function inviteStage(env, reason) {
+      return currentStage(env).filter(function (x) { return x.status === 'Waiting'; }).map(function (x) {
+        var r = sendInvite(env, x, reason, 'system');
+        return { signer: x, emailed: r.emailed, link: r.link };
+      });
+    }
+    /** Links that couldn't be emailed, so the landlord can pass them on another way. */
+    function unsentLinks(invites) {
+      return invites.filter(function (i) { return !i.emailed; }).map(function (i) { return { name: signerDetails(i.signer).name, email: i.signer.email, link: i.link }; });
     }
 
     function sendInvite(env, s, reason, actor) {
@@ -1472,8 +1492,7 @@ var ESign = (function () {
       if (env.status === 'Declined') fail('This agreement was declined, so it can\'t be signed.', 'DECLINED');
       if (env.status === 'Expired') fail('This signing link has expired. Ask the landlord to send the agreement again.', 'EXPIRED');
       if (s.status === 'Signed') fail('You have already signed this agreement.', 'ALREADY_SIGNED');
-      var cur = currentSigner(env);
-      if (!cur || cur.id !== s.id) fail('It isn\'t your turn to sign yet. We\'ll email you when ' + signerDetails(cur).name + ' has signed.', 'NOT_YOUR_TURN');
+      if (!canSignNow(env, s)) fail('The landlord signs after all the tenants. We\'ll email you when ' + nameList(currentStage(env)) + (currentStage(env).length > 1 ? ' have' : ' has') + ' signed.', 'NOT_YOUR_TURN');
     }
 
     /* ---------- views ---------- */
@@ -1510,7 +1529,7 @@ var ESign = (function () {
     }
 
     function signerView(env, s) {
-      var cur = currentSigner(env);
+      var stage = currentStage(env), mine = canSignNow(env, s);
       var verified = !!s.verifiedAt && minutesSince(s.verifiedAt) < VERIFY_MINUTES;
       var doc = renderAgreement(env, { mode: 'view', fmt: fmt });
       if (env.kind === 'variation' && s.kind === 'incoming') {
@@ -1537,9 +1556,8 @@ var ESign = (function () {
           locationDeclined: s.locationDeclined ? clone(s.locationDeclined) : null,
           details: clone(signerDetails(s))
         },
-        isMyTurn: env.status === 'Sent' && !!cur && cur.id === s.id,
-        waitingFor: env.status === 'Sent' && cur && cur.id !== s.id && s.status !== 'Signed' ?
-          { roleLabel: roleLabel(cur.role), name: signerDetails(cur).name } : null,
+        isMyTurn: env.status === 'Sent' && mine,
+        waitingFor: env.status === 'Sent' && !mine && s.status !== 'Signed' && stage.length ? { names: nameList(stage), count: stage.length } : null,
         signers: env.signers.map(function (x) {
           return { roleLabel: roleLabel(x.role), name: signerDetails(x).name, status: x.status, signedAt: x.signedAt || null, isMe: x.id === s.id };
         }),
@@ -1672,10 +1690,10 @@ var ESign = (function () {
         expiresAt: env.expiresAt, warnings: r.warnings,
         attachments: (env.attachments || []).map(function (a) { return { label: a.label, name: a.name, sha256: a.sha256 }; })
       });
-      var inv = sendInvite(env, env.signers[0], 'first signer', 'system');
+      var unsent = unsentLinks(inviteStage(env, 'sent for signing'));
       store.saveEnvelope(env);
       notify(env, 'sent');
-      return { agreement: summary(env), warnings: r.warnings, firstLink: inv.emailed ? null : inv.link };
+      return { agreement: summary(env), warnings: r.warnings, firstLink: unsent.length ? unsent[0].link : null, unsentLinks: unsent };
     }
 
     /* ---------- change of tenants (variation) ---------- */
@@ -1780,10 +1798,10 @@ var ESign = (function () {
       parent.pendingVariationId = env.id;
       audit(parent, 'VARIATION_STARTED', actor || 'landlord', { variationId: env.id, version: env.version });
       store.saveEnvelope(parent);
-      var inv = sendInvite(env, env.signers[0], 'first signer', 'system');
+      var unsent = unsentLinks(inviteStage(env, 'sent for signing'));
       store.saveEnvelope(env);
       notify(env, 'sent');
-      return { agreement: summary(env), warnings: b.warnings, firstLink: inv.emailed ? null : inv.link };
+      return { agreement: summary(env), warnings: b.warnings, firstLink: unsent.length ? unsent[0].link : null, unsentLinks: unsent };
     }
 
     function previewVariation(input) {
@@ -1808,8 +1826,7 @@ var ESign = (function () {
       if (env.status !== 'Sent') fail('This agreement is ' + env.status.toLowerCase() + ', so no new links can be sent.');
       var s = env.signers.filter(function (x) { return x.id === signerId; })[0];
       if (!s) fail('Signer not found.');
-      var cur = currentSigner(env);
-      if (!cur || cur.id !== s.id) fail('Only the person whose turn it is can be sent a link. Right now that is ' + signerDetails(cur).name + '.');
+      if (!canSignNow(env, s)) fail('Links can only be sent to people who can sign now: ' + nameList(currentStage(env)) + '. The landlord is sent theirs once all the tenants have signed.');
       var out;
       if (channel === 'email') {
         out = sendInvite(env, s, 'resent by ' + (actor || 'landlord'), actor);
@@ -2042,18 +2059,17 @@ var ESign = (function () {
         strokes: sig.strokes, location: sig.location, locationDeclined: sig.locationDeclined || null
       }, client);
 
-      var next = currentSigner(env);
-      if (next) {
-        sendInvite(env, next, 'after ' + roleLabel(s.role) + ' signed', 'system');
+      var stage = currentStage(env);
+      if (stage.length) {
+        inviteStage(env, 'all the tenants have signed');   // only does anything when the landlord's turn has just started
         if (cfg.ownerEmail && cfg.notifyOwnerEachSignature !== false && s.kind !== 'landlord') {
           var done = env.signers.filter(function (x) { return x.status === 'Signed'; }).length;
+          var still = 'Still to sign: ' + nameList(stage) + (stage[0].kind === 'landlord' ? ' (all the tenants have signed, so the landlord has been sent their link)' : '') + '.';
           mail(env, {
             to: cfg.ownerEmail, kind: 'notice',
             subject: details.name + ' signed (' + done + '/' + env.signers.length + '): ' + env.propertyAddress,
-            text: details.name + ' signed ' + docPhrase(env) + ' for ' + env.propertyAddress + '. Next to sign: ' +
-              signerDetails(next).name + ' (' + roleLabel(next.role) + ').',
-            html: wrapHtml('<p><b>' + esc(details.name) + '</b> signed ' + docPhrase(env) + ' for ' + esc(env.propertyAddress) +
-              '.</p><p>Next to sign: ' + esc(signerDetails(next).name) + ' (' + esc(roleLabel(next.role)) + ').</p>')
+            text: details.name + ' signed ' + docPhrase(env) + ' for ' + env.propertyAddress + '. ' + still,
+            html: wrapHtml('<p><b>' + esc(details.name) + '</b> signed ' + docPhrase(env) + ' for ' + esc(env.propertyAddress) + '.</p><p>' + esc(still) + '</p>')
           });
         }
         store.saveEnvelope(env);

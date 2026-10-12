@@ -26,7 +26,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.6.0',
+    version: '1.7.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -173,7 +173,7 @@ var ESignTemplates = (function () {
         id: 'electronic',
         heading: '9. Signing electronically',
         blocks: [
-          { type: 'p', text: 'The parties agree that this agreement may be signed electronically, one party after another in the order shown below, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The agreement is complete when every party has signed. Each party will receive a copy of the signed agreement with a signing certificate that records how and when each person signed.' }
+          { type: 'p', text: 'The parties agree that this agreement may be signed electronically: the tenants first, in any order, and then the landlord, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The agreement is complete when every party has signed. Each party will receive a copy of the signed agreement with a signing certificate that records how and when each person signed.' }
         ]
       },
       {
@@ -193,7 +193,7 @@ var ESignTemplates = (function () {
    */
   T['nz-change-of-tenants-v1'] = {
     id: 'nz-change-of-tenants-v1',
-    version: '2.0.0',
+    version: '2.1.0',
     title: 'Variation of Tenancy Agreement: Change of Tenants',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This variation amends the residential tenancy agreement listed in section 1. It changes only who the tenants are. ' +
@@ -249,7 +249,7 @@ var ESignTemplates = (function () {
       {
         id: 'electronic', heading: '6. Signing electronically',
         blocks: [
-          { type: 'p', text: 'The parties agree that this variation may be signed electronically, one party after another in the order shown below, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The variation takes effect only when every party has signed. Until then the agreement continues unchanged.' }
+          { type: 'p', text: 'The parties agree that this variation may be signed electronically: the tenants (joining, continuing and leaving) first, in any order, and then the landlord, and that an electronic signature has the same effect as a handwritten one (Contract and Commercial Law Act 2017, Part 4). The variation takes effect only when every party has signed. Until then the agreement continues unchanged.' }
         ]
       },
       { id: 'signatures', heading: '7. Signatures', blocks: [{ type: 'signatures' }] }
