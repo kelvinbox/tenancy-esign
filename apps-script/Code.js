@@ -45,8 +45,13 @@ function doGet() {
   return json_({ ok: true, app: 'tenancy-esign', version: ESign.VERSION });
 }
 
+var ESIGN_T0 = Date.now();   // when this request's script started (cold starts included), for the timing reply
+/* Requests that only read (they may at most mark an expired agreement): they wait a few seconds for the lock, then go ahead */
+var ESIGN_READS = { verify: 1, 'admin.list': 1, 'admin.get': 1, 'admin.preview': 1, 'admin.download': 1, 'admin.progress': 1,
+                    'admin.previewVariation': 1, 'admin.summary': 1, 'sign.download': 1, 'sign.attachment': 1 };
+
 function doPost(e) {
-  var req;
+  var req, t0 = Date.now(), t1 = t0, held = false;
   try {
     req = JSON.parse(e && e.postData ? e.postData.contents : '{}');
   } catch (err) {
@@ -56,18 +61,21 @@ function doPost(e) {
 
   var lock = LockService.getScriptLock();
   try {
-    lock.waitLock(25000);
+    if (ESIGN_READS[req.action]) held = lock.tryLock(3000);   // a status check never queues long behind someone signing
+    else { lock.waitLock(25000); held = true; }
+    t1 = Date.now();
     var p = props_();
     if (!p.SHEET_ID || !p.FOLDER_ID) throw codeError_('The server isn\'t set up yet. Run setup() in the Apps Script editor.', 'SETUP');
     var engine = ESign.createEngine(sheetStore_(p), services_(p));
     var data = ESign.dispatch(engine, req, { requireAdminKey: true, adminKey: p.ADMIN_KEY || '' });
-    return json_({ ok: true, data: data });
+    var t2 = Date.now();
+    return json_({ ok: true, data: data, ms: { start: t0 - ESIGN_T0, lockWait: t1 - t0, work: t2 - t1, total: t2 - ESIGN_T0 } });
   } catch (err) {
     if (err && err.code) return json_({ ok: false, error: err.message, code: err.code });
     console.error(err && err.stack ? err.stack : err);
     return json_({ ok: false, error: 'Something went wrong on the server. Please try again in a minute.', code: 'SERVER' });
   } finally {
-    try { lock.releaseLock(); } catch (x) { /* not held */ }
+    if (held) { try { lock.releaseLock(); } catch (x) { /* not held */ } }
   }
 }
 

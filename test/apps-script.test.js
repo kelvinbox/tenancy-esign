@@ -78,7 +78,7 @@ function fakeGoogle() {
     Logger: { log: () => {} },
     Session: { getEffectiveUser: () => ({ getEmail: () => 'owner@example.com' }), getActiveUser: () => ({ getEmail: () => 'owner@example.com' }) },
     PropertiesService: { getScriptProperties: () => ({ getProperties: () => Object.assign({}, props), setProperties: o => Object.assign(props, o), getProperty: k => props[k] || null }) },
-    LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+    LockService: { getScriptLock: () => ({ waitLock() {}, tryLock() { return true; }, releaseLock() {} }) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: s => ({ setMimeType() { return this; }, getContent: () => s }) },
     SpreadsheetApp: {
       create: () => { const sid = id('sheet'); sheets[sid] = { tabs: {} }; return { getId: () => sid }; },

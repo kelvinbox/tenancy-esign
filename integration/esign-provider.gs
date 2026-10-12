@@ -43,11 +43,24 @@ function esignConfig_() {
  * err.code set and a plain-English message. Network failures are retried only for read-only
  * actions, so a timeout can never send an agreement twice.
  */
+/**
+ * Records how long a call to the signing service took (for Tenant Management's Speed check, when it's there):
+ * the whole call, and the service's own start-up, wait for its lock and work. The rest is Google and the network.
+ */
+function esignNoteTiming_(action, ms, srv, tries) {
+  if (typeof TM_PARTS === 'undefined') return;
+  var k = 'signing ' + String(action).replace(/^admin\./, '');
+  TM_PARTS[k] = (TM_PARTS[k] || 0) + ms;
+  if (srv) { TM_PARTS[k + ': their queue'] = srv.lockWait; TM_PARTS[k + ': their work'] = srv.work; }
+  if (tries > 1) TM_PARTS[k + ': tries'] = tries;
+}
+
 function esignCall_(action, params, actor) {
   var cfg = esignConfig_();
   var body = { action: action, adminKey: cfg.key, actor: String(actor || '').slice(0, 60) };
   Object.keys(params || {}).forEach(function (k) { body[k] = params[k]; });
   var attempts = ESIGN_SAFE_TO_RETRY[action] ? 3 : 1, lastErr = null;
+  var tf = Date.now();
   for (var i = 1; i <= attempts; i++) {
     var res;
     try {
@@ -82,6 +95,7 @@ function esignCall_(action, params, actor) {
       if (ESIGN_SAFE_TO_RETRY[action]) { if (i < attempts) Utilities.sleep(1000 * i); continue; }
       throw new Error('The signing service was still starting up and didn\'t confirm. Wait a minute and tap Check status before trying again, so nothing is sent twice.');
     }
+    esignNoteTiming_(action, Date.now() - tf, out.ms, i);
     return out.data;
   }
   if (!ESIGN_SAFE_TO_RETRY[action]) {
