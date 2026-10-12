@@ -413,6 +413,15 @@
     });
   }
 
+  /** A small map of the location they shared (OpenStreetMap embed, no key) with a Google Maps link. */
+  function mapHtml(lat, lng, acc) {
+    var d = 0.004, q = lat.toFixed(5) + ',' + lng.toFixed(5);
+    var src = 'https://www.openstreetmap.org/export/embed.html?bbox=' + [lng - d * 1.6, lat - d, lng + d * 1.6, lat + d].map(function (x) { return x.toFixed(5); }).join('%2C') +
+      '&layer=mapnik&marker=' + lat.toFixed(5) + '%2C' + lng.toFixed(5);
+    return '<div class="minimap"><iframe title="Map of where you are signing" loading="lazy" src="' + src + '"></iframe></div>' +
+      '<div class="small muted">' + q + (acc !== null && acc !== undefined ? ' (within ' + Math.round(acc) + ' m)' : '') + ' &middot; <a href="https://maps.google.com/?q=' + q + '" target="_blank" rel="noopener">Open in Google Maps</a></div>';
+  }
+
   function renderSign() {
     var rows = view.fields.filter(function (f) { return f.key !== 'email'; }).map(function (f) {
       var v = details[f.key] || '';
@@ -421,6 +430,8 @@
     }).join('');
     app.innerHTML = stepsHtml() +
       '<div class="card doc"><h2>Your details</h2><table class="kv">' + rows + '</table><button class="btn link small" id="edit" type="button">Change</button></div>' +
+      (view.me.location ? '<div class="card"><h2>Where you\'re signing</h2>' + mapHtml(Number(view.me.location.lat), Number(view.me.location.lng), view.me.location.accuracy) + '</div>'
+        : view.me.locationDeclined ? '<div class="card"><h2>Where you\'re signing</h2><p class="small muted">Not shared. The audit trail records that you chose not to share your location.</p></div>' : '') +
       '<div class="card"><h2>Sign</h2>' +
       '<p class="small muted">Sign in the box with your finger (or mouse). Turn your phone sideways for more room.</p>' +
       '<div class="pad-wrap" id="pad"><canvas></canvas><div class="pad-line"></div><div class="pad-x">&#10005;</div><div class="pad-hint">Sign here</div></div>' +
