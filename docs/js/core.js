@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.13.0';
+  var VERSION = '0.14.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -329,6 +329,17 @@ var ESign = (function () {
     if (unitTitle && !(rules && str(rules.name))) errors.push('This is a unit title property: attach the body corporate rules.');
     if (unitTitle && rules && str(rules.base64).length > 27000000) errors.push('The body corporate rules file is too large (20 MB at most).');
 
+    var room = str(T.room), power = ['tenant', 'included', 'capped'].indexOf(str(T.power)) >= 0 ? str(T.power) : 'tenant';
+    var powerCap = moneyNum(T.powerCap), powerDays = T.powerDays === undefined || T.powerDays === '' || T.powerDays === null ? 14 : Number(T.powerDays);
+    var roomCount = Number(T.roomCount) || 0;
+    if (room.length > 60) errors.push('The room name is too long (60 characters at most).');
+    if (power === 'capped') {
+      if (!(powerCap > 0)) errors.push('Enter the monthly electricity cap, for example 200.');
+      if (!(powerDays >= 1 && powerDays <= 90 && Math.floor(powerDays) === powerDays)) errors.push('Enter how many days the tenant has to pay electricity over the cap (1 to 90).');
+      if (room && !(roomCount >= 1)) errors.push('Enter how many rooms the premises has, to split electricity over the cap.');
+    }
+    if (room && !roomCount) roomCount = 1;
+
     v.terms = {
       rentPerWeek: rent > 0 ? money(rent) : '',
       bond: bond >= 0 ? money(bond) : '',
@@ -347,7 +358,14 @@ var ESign = (function () {
       additionalTerms: str(T.additionalTerms),
       unitTitle: unitTitle,
       bodyCorporateRules: unitTitle && rules && str(rules.name) ? { name: str(rules.name), sha256: '' } : null,
-      bottledGas: T.bottledGas === true || T.bottledGas === 'true'
+      bottledGas: T.bottledGas === true || T.bottledGas === 'true',
+      // a room let on its own (blank = the whole premises), and who pays for internet and electricity
+      room: room,
+      roomCount: room || power === 'capped' ? roomCount : '',
+      internetIncluded: T.internetIncluded === true || T.internetIncluded === 'true',
+      power: power,
+      powerCap: power === 'capped' && powerCap > 0 ? money(powerCap) : '',
+      powerDays: power === 'capped' ? powerDays : ''
     };
     v.rulesFile = unitTitle && rules && str(rules.base64) ? { name: str(rules.name), mime: str(rules.mime) || 'application/pdf', base64: str(rules.base64) } : null;
 
@@ -543,6 +561,22 @@ var ESign = (function () {
 
   function signerDetails(s) { return s.details || s.prefill || {}; }
 
+  /** Where the tenancy is: "Room A, 14 Kowhai Lane..." for a room let on its own, else the address. */
+  function placeOf(env) { var r = env && env.terms && env.terms.room; return r ? r + ', ' + env.propertyAddress : env.propertyAddress; }
+  /** One room's share of the electricity over the cap, in words. */
+  function shareWord(n) {
+    var w = ['', 'all', 'half', 'one third', 'one quarter', 'one fifth', 'one sixth', 'one seventh', 'one eighth', 'one ninth', 'one tenth'];
+    return w[n] || '1/' + n;
+  }
+  /** The services the tenant pays for themselves: "electricity, telephone and internet" unless the landlord includes some. */
+  function tenantUtilities(t) {
+    var u = [];
+    if (!t.power || t.power === 'tenant') u.push('electricity');
+    u.push('telephone');
+    if (!t.internetIncluded) u.push('internet');
+    return u.length > 1 ? u.slice(0, -1).join(', ') + ' and ' + u[u.length - 1] : u[0];
+  }
+
   function buildFields(env) {
     var t = env.terms, L = env.landlord;
     var fixed = !!t.endDate;
@@ -583,7 +617,20 @@ var ESign = (function () {
       IsUnitTitle: !!t.unitTitle,
       BodyCorporateRulesName: t.bodyCorporateRules ? t.bodyCorporateRules.name : '',
       BodyCorporateRulesSha: t.bodyCorporateRules && t.bodyCorporateRules.sha256 ? t.bodyCorporateRules.sha256 : 'recorded when the agreement is sent',
-      HasBottledGas: !!t.bottledGas
+      HasBottledGas: !!t.bottledGas,
+      Premises: placeOf(env),
+      IsRoom: !!t.room,
+      RoomName: t.room || '',
+      RoomCount: String(t.roomCount || ''),
+      InternetIncluded: !!t.internetIncluded,
+      PowerIncluded: t.power === 'included',
+      PowerCapped: t.power === 'capped',
+      PowerCappedRoom: t.power === 'capped' && !!t.room,
+      PowerCappedWhole: t.power === 'capped' && !t.room,
+      PowerCap: t.powerCap || '',
+      PowerDays: String(t.powerDays || ''),
+      PowerShare: shareWord(Number(t.roomCount) || 1),
+      TenantUtilities: tenantUtilities(t)
     };
     var sp = parseYmd(t.startDate), ep = parseYmd(t.endDate);
     if (sp) { f.TenancyStartDay = ordinal(sp.d); f.TenancyStartMonth = MONTHS[sp.m - 1]; f.TenancyStartYear = String(sp.y); }
@@ -796,7 +843,7 @@ var ESign = (function () {
     var tenants = env.signers.filter(function (s) { return s.kind === 'tenant'; }).map(function (s) { return val(signerDetails(s).name, mode); });
     var cell = function (label, html) { return '<td><div class="kd-l">' + esc(label) + '</div><div class="kd-v">' + html + '</div></td>'; };
     var term = f.IsFixedTerm ? fillText('Fixed term: {{TenancyStart}} to {{TenancyEnd}}', f, mode) : fillText('Periodic, from {{TenancyStart}}', f, mode);
-    return '<table class="kd"><tr>' + cell('Premises', fillText('{{PropertyAddress}}', f, mode)) + cell('Tenancy', term) +
+    return '<table class="kd"><tr>' + cell('Premises', fillText('{{Premises}}', f, mode)) + cell('Tenancy', term) +
       cell('Rent', fillText('${{RentPerWeek}} per week', f, mode)) + '</tr><tr>' +
       cell('Bond', fillText('${{BondAmount}}', f, mode)) + cell('Landlord', fillText('{{LandlordName}}', f, mode)) +
       cell(tenants.length > 1 ? 'Tenants' : 'Tenant', tenants.join('<br>') || '&mdash;') + '</tr></table>';
@@ -864,7 +911,7 @@ var ESign = (function () {
             esc(d.id) + ', signed by everyone on ' + esc((opts.fmt || String)(d.completedAt)) +
             '<br><span class="mono">SHA-256 ' + esc(d.sha256) + '</span>');
         }).join('') +
-          kvRow('Premises', fillText('{{PropertyAddress}}', f, mode)) +
+          kvRow('Premises', fillText('{{Premises}}', f, mode)) +
           kvRow('Landlord', fillText('{{LandlordName}}', f, mode)) +
           kvRow('This variation', fillText('Version {{Version}}', f, mode)) + '</table>';
       case 'changes':
@@ -922,7 +969,7 @@ var ESign = (function () {
    */
   function renderTenancySummaryHtml(original, tenants, history, opts) {
     var fmt = (opts && opts.fmt) || String, t = original.terms;
-    var h = '<h1>Tenancy summary</h1><div class="sub">' + esc(original.propertyAddress) + ' &middot; tenancy ' + esc(original.id) + '</div>' +
+    var h = '<h1>Tenancy summary</h1><div class="sub">' + esc(placeOf(original)) + ' &middot; tenancy ' + esc(original.id) + '</div>' +
       '<div class="fp"><b>This is a summary, not a signed document and not a tenancy agreement.</b> The tenancy agreement is made up of ' +
       'the signed documents listed below. Where this summary and those documents differ, the signed documents apply.</div>';
     h += '<h2>Tenants now</h2><table class="kv">' + tenants.map(function (p, i) {
@@ -1379,12 +1426,12 @@ var ESign = (function () {
     function inviteEmail(env, s, link) {
       var first = signerDetails(s).name.split(' ')[0];
       var exp = fmt(env.expiresAt);
-      var subject = 'Please sign: ' + docShort(env) + ' for ' + env.propertyAddress;
-      var text = 'Hi ' + first + ',\n\n' + senderName(env) + ' has sent you ' + docPhrase(env) + ' for ' + env.propertyAddress +
+      var subject = 'Please sign: ' + docShort(env) + ' for ' + placeOf(env);
+      var text = 'Hi ' + first + ',\n\n' + senderName(env) + ' has sent you ' + docPhrase(env) + ' for ' + placeOf(env) +
         ' to read and sign. It takes about 5 minutes and works on your phone.\n\nOpen your personal signing link:\n' + link +
         '\n\nThe link is just for you, so please don\'t forward it. It expires on ' + exp + '.\n\nThanks,\n' + senderName(env);
       var html = wrapHtml('<p>Hi ' + esc(first) + ',</p><p>' + esc(senderName(env)) + ' has sent you ' + docPhrase(env) + ' for <b>' +
-        esc(env.propertyAddress) + '</b> to read and sign. It takes about 5 minutes and works on your phone.</p>' +
+        esc(placeOf(env)) + '</b> to read and sign. It takes about 5 minutes and works on your phone.</p>' +
         button(link, 'Review and sign') +
         '<p style="color:#555;font-size:14px">This link is just for you, so please don\'t forward it. It expires on ' + esc(exp) + '.</p>' +
         joiningNote(env, s, true) + '<p>Thanks,<br>' + esc(senderName(env)) + '</p>');
@@ -1660,7 +1707,7 @@ var ESign = (function () {
         version: 1,
         tenancyId: id,
         status: 'Sent',
-        title: 'Tenancy agreement: ' + v.propertyAddress,
+        title: 'Tenancy agreement: ' + (v.terms.room ? v.terms.room + ', ' : '') + v.propertyAddress,
         propertyAddress: v.propertyAddress,
         createdAt: t,
         createdBy: actor || 'landlord',
@@ -1738,7 +1785,7 @@ var ESign = (function () {
         version: version,
         tenancyId: tenancyIdOf(parent),
         status: 'Sent',
-        title: 'Variation of tenancy agreement (version ' + version + '): ' + parent.propertyAddress,
+        title: 'Variation of tenancy agreement (version ' + version + '): ' + placeOf(parent),
         propertyAddress: parent.propertyAddress,
         createdAt: t,
         createdBy: actor || 'landlord',
@@ -1850,7 +1897,7 @@ var ESign = (function () {
         var first = signerDetails(s).name.split(' ')[0];
         out = {
           link: link,
-          smsBody: 'Hi ' + first + ', here is your link to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + ': ' + link + ' - ' + senderName(env)
+          smsBody: 'Hi ' + first + ', here is your link to sign ' + docPhrase(env) + ' for ' + placeOf(env) + ': ' + link + ' - ' + senderName(env)
         };
       }
       store.saveEnvelope(env);
@@ -1868,10 +1915,10 @@ var ESign = (function () {
         if (s.sentAt && s.status !== 'Signed' && s.kind !== 'landlord') {
           mail(env, {
             to: s.email, kind: 'cancelled',
-            subject: 'Cancelled: ' + docShort(env) + ' for ' + env.propertyAddress,
-            text: 'Hi ' + signerDetails(s).name.split(' ')[0] + ',\n\nThe ' + docShort(env) + ' for ' + env.propertyAddress +
+            subject: 'Cancelled: ' + docShort(env) + ' for ' + placeOf(env),
+            text: 'Hi ' + signerDetails(s).name.split(' ')[0] + ',\n\nThe ' + docShort(env) + ' for ' + placeOf(env) +
               ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' + senderName(env),
-            html: wrapHtml('<p>Hi ' + esc(signerDetails(s).name.split(' ')[0]) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(env.propertyAddress) +
+            html: wrapHtml('<p>Hi ' + esc(signerDetails(s).name.split(' ')[0]) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(placeOf(env)) +
               '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p><p>' + esc(senderName(env)) + '</p>')
           });
         }
@@ -1918,9 +1965,9 @@ var ESign = (function () {
       var ok = mail(env, {
         to: s.email, kind: 'code', code: code,
         subject: code + ' is your signing code',
-        text: 'Your code to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + ' is:\n\n' + code +
+        text: 'Your code to sign ' + docPhrase(env) + ' for ' + placeOf(env) + ' is:\n\n' + code +
           '\n\nIt expires in ' + OTP_MINUTES + ' minutes. If you didn\'t ask for this code, you can ignore this email.',
-        html: wrapHtml('<p>Your code to sign ' + docPhrase(env) + ' for <b>' + esc(env.propertyAddress) + '</b> is:</p>' +
+        html: wrapHtml('<p>Your code to sign ' + docPhrase(env) + ' for <b>' + esc(placeOf(env)) + '</b> is:</p>' +
           '<p style="font-size:30px;letter-spacing:6px;font-weight:bold;margin:16px 0">' + code + '</p>' +
           '<p style="color:#555;font-size:14px">It expires in ' + OTP_MINUTES + ' minutes. If you didn\'t ask for this code, you can ignore this email.</p>')
       });
@@ -2120,9 +2167,9 @@ var ESign = (function () {
           var still = 'Still to sign: ' + nameList(stage) + (stage[0].kind === 'landlord' ? ' (all the tenants have signed, so the landlord has been sent their link)' : '') + '.';
           mail(env, {
             to: cfg.ownerEmail, kind: 'notice',
-            subject: details.name + ' signed (' + done + '/' + env.signers.length + '): ' + env.propertyAddress,
-            text: details.name + ' signed ' + docPhrase(env) + ' for ' + env.propertyAddress + '. ' + still,
-            html: wrapHtml('<p><b>' + esc(details.name) + '</b> signed ' + docPhrase(env) + ' for ' + esc(env.propertyAddress) + '.</p><p>' + esc(still) + '</p>')
+            subject: details.name + ' signed (' + done + '/' + env.signers.length + '): ' + placeOf(env),
+            text: details.name + ' signed ' + docPhrase(env) + ' for ' + placeOf(env) + '. ' + still,
+            html: wrapHtml('<p><b>' + esc(details.name) + '</b> signed ' + docPhrase(env) + ' for ' + esc(placeOf(env)) + '.</p><p>' + esc(still) + '</p>')
           });
         }
         store.saveEnvelope(env);
@@ -2167,12 +2214,12 @@ var ESign = (function () {
           earlier.map(function (d) { return '<li>' + esc(d.final.name) + '<br><code style="word-break:break-all;font-size:12px">SHA-256 ' + esc(d.final.sha256) + '</code></li>'; }).join('') + '</ul>' : '';
         var ok = mail(env, {
           to: addr, kind: 'completed', attachments: attachments,
-          subject: 'Signed: ' + docShort(env) + ' for ' + env.propertyAddress,
-          text: 'Everyone has signed ' + docPhrase(env) + ' for ' + env.propertyAddress + '. Your copy is attached (' + fin.name + ').' + extraText + '\n\n' +
+          subject: 'Signed: ' + docShort(env) + ' for ' + placeOf(env),
+          text: 'Everyone has signed ' + docPhrase(env) + ' for ' + placeOf(env) + '. Your copy is attached (' + fin.name + ').' + extraText + '\n\n' +
             'Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:\n' +
             'Document SHA-256: ' + fin.sha256 + '\nAudit trail SHA-256: ' + env.final.auditHeadAtRender + '\n' +
             (cfg.verifyUrl ? '\nCheck a copy at any time: ' + cfg.verifyUrl + '\n' : '') + '\n' + senderName(env),
-          html: wrapHtml('<p>Everyone has signed ' + docPhrase(env) + ' for <b>' + esc(env.propertyAddress) + '</b>. Your copy is attached (' + esc(fin.name) + ').</p>' + extraHtml +
+          html: wrapHtml('<p>Everyone has signed ' + docPhrase(env) + ' for <b>' + esc(placeOf(env)) + '</b>. Your copy is attached (' + esc(fin.name) + ').</p>' + extraHtml +
             '<p style="font-size:14px;color:#444">Keep this email. It records the fingerprints that prove your copy hasn\'t been altered:<br>' +
             'Document SHA-256: <code style="word-break:break-all">' + esc(fin.sha256) + '</code><br>' +
             'Audit trail SHA-256: <code style="word-break:break-all">' + esc(env.final.auditHeadAtRender) + '</code></p>' +
@@ -2209,9 +2256,9 @@ var ESign = (function () {
       if (cfg.ownerEmail) {
         mail(env, {
           to: cfg.ownerEmail, kind: 'notice',
-          subject: 'Declined by ' + signerDetails(s).name + ': ' + env.propertyAddress,
-          text: signerDetails(s).name + ' declined to sign ' + docPhrase(env) + ' for ' + env.propertyAddress + '.\n\nReason: ' + s.declineReason,
-          html: wrapHtml('<p><b>' + esc(signerDetails(s).name) + '</b> declined to sign ' + docPhrase(env) + ' for ' + esc(env.propertyAddress) +
+          subject: 'Declined by ' + signerDetails(s).name + ': ' + placeOf(env),
+          text: signerDetails(s).name + ' declined to sign ' + docPhrase(env) + ' for ' + placeOf(env) + '.\n\nReason: ' + s.declineReason,
+          html: wrapHtml('<p><b>' + esc(signerDetails(s).name) + '</b> declined to sign ' + docPhrase(env) + ' for ' + esc(placeOf(env)) +
             '.</p><p>Reason: ' + esc(s.declineReason) + '</p>')
         });
       }

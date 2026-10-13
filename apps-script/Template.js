@@ -26,7 +26,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.7.0',
+    version: '1.8.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -49,18 +49,24 @@ var ESignTemplates = (function () {
           {
             type: 'kv', rows: [
               ['Address of the premises', '{{PropertyAddress}}'],
+              ['Room let to the tenant', '{{RoomName}}', { when: 'IsRoom' }],
               ['Type of tenancy', '{{TenancyTypeText}}'],
               ['Start date', '{{TenancyStart}}'],
               ['End date', '{{TenancyEnd}}', { when: 'IsFixedTerm' }],
               ['Maximum number of occupants', '{{MaximumOccupants}}'],
               ['Chattels provided by the landlord', '{{Chattels}}'],
+              ['Internet', 'Provided by the landlord and included in the rent', { when: 'InternetIncluded' }],
+              ['Electricity', 'Included in the rent', { when: 'PowerIncluded' }],
+              ['Electricity', 'Included in the rent up to ${{PowerCap}} a month for the whole premises', { when: 'PowerCapped' }],
               ['Unit title property', 'Yes. The current body corporate rules are attached and form part of this agreement.', { when: 'IsUnitTitle' }],
               ['Body corporate rules', '{{BodyCorporateRulesName}}', { when: 'IsUnitTitle' }]
             ]
           },
           { type: 'p', when: 'IsFixedTerm', text: 'This is a fixed-term tenancy. When the fixed term ends it becomes a periodic tenancy, unless the parties agree otherwise or notice is given as the Act allows.' },
           { type: 'p', when: 'IsPeriodic', text: 'This is a periodic tenancy. It continues until it is ended by notice given as the Act allows.' },
-          { type: 'p', text: 'No more than {{MaximumOccupants}} people may live at the premises at any time.' }
+          { type: 'p', when: 'IsRoom', text: 'The tenant has exclusive use of {{RoomName}} and shares the rest of the premises (the common areas) with the other tenants of the premises.' },
+          { type: 'p', unless: 'IsRoom', text: 'No more than {{MaximumOccupants}} people may live at the premises at any time.' },
+          { type: 'p', when: 'IsRoom', text: 'No more than {{MaximumOccupants}} people may live in {{RoomName}} at any time.' }
         ]
       },
       {
@@ -116,7 +122,10 @@ var ESignTemplates = (function () {
             'let the tenant have quiet enjoyment of the premises',
             'give at least 48 hours\' notice before an inspection (no more than one inspection every 4 weeks), and at least 24 hours\' notice before entering to do repairs or maintenance, entering only between 8am and 7pm',
             'tell the tenant in writing within 10 working days of any change to the landlord\'s name, contact details or address for service',
-            { text: 'tell the tenant of any changes to the body corporate rules that affect the premises', when: 'IsUnitTitle' }
+            { text: 'tell the tenant of any changes to the body corporate rules that affect the premises', when: 'IsUnitTitle' },
+            { text: 'provide internet access at the premises, included in the rent', when: 'InternetIncluded' },
+            { text: 'pay for the electricity used at the premises, which is included in the rent', when: 'PowerIncluded' },
+            { text: 'pay for the electricity used at the premises up to **${{PowerCap}} a month** (the bill for the whole premises), which is included in the rent, and give the tenant a copy of any monthly bill that is more than that', when: 'PowerCapped' }
           ]
         }]
       },
@@ -126,7 +135,9 @@ var ESignTemplates = (function () {
         blocks: [{
           type: 'list', items: [
             'pay the rent on time',
-            'pay for the electricity, telephone and internet services they use during the tenancy',
+            'pay for the {{TenantUtilities}} services they use during the tenancy',
+            { text: 'pay their share of any electricity over the cap: if a month\'s electricity bill for the whole premises is more than ${{PowerCap}}, the amount over is split equally between the {{RoomCount}} rooms of the premises, and the tenant pays **{{PowerShare}}** of it (one room\'s share) within **{{PowerDays}} days** of the landlord giving them a copy of the bill', when: 'PowerCappedRoom' },
+            { text: 'pay for any electricity over the cap: if a month\'s electricity bill for the premises is more than ${{PowerCap}}, the tenant pays the amount over within **{{PowerDays}} days** of the landlord giving them a copy of the bill', when: 'PowerCappedWhole' },
             { text: 'pay for the bottled gas they use (refills). The landlord pays the gas bottle hire', when: 'HasBottledGas' },
             'keep the premises reasonably clean and tidy, and remove rubbish as required',
             'tell the landlord as soon as possible about any damage or anything that needs repair',
@@ -134,7 +145,8 @@ var ESignTemplates = (function () {
             'not use the premises for any unlawful purpose',
             'not disturb the neighbours\' peace, comfort or privacy',
             'not make changes to the premises without the landlord\'s written consent',
-            'not let more than the maximum number of occupants live at the premises',
+            { text: 'not let more than the maximum number of occupants live at the premises', unless: 'IsRoom' },
+            { text: 'not let more than the maximum number of occupants live in {{RoomName}}', when: 'IsRoom' },
             'not sublet the premises or any part of them, or otherwise part with possession of them (other than by assignment), without the landlord\'s explicit written permission',
             'not assign the tenancy without the landlord\'s prior written consent. The landlord will consider any request to assign the tenancy and will not unreasonably withhold consent',
             { text: 'comply with the body corporate rules that apply to the premises', when: 'IsUnitTitle' },
@@ -193,7 +205,7 @@ var ESignTemplates = (function () {
    */
   T['nz-change-of-tenants-v1'] = {
     id: 'nz-change-of-tenants-v1',
-    version: '2.1.0',
+    version: '2.2.0',
     title: 'Variation of Tenancy Agreement: Change of Tenants',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This variation amends the residential tenancy agreement listed in section 1. It changes only who the tenants are. ' +
@@ -203,7 +215,7 @@ var ESignTemplates = (function () {
       {
         id: 'documents', heading: '1. The agreement being varied',
         blocks: [
-          { type: 'p', text: 'This variation amends the following signed documents, which together make up the tenancy agreement for {{PropertyAddress}}. Each is identified by its SHA-256 fingerprint, so there can be no doubt which document is meant.' },
+          { type: 'p', text: 'This variation amends the following signed documents, which together make up the tenancy agreement for {{Premises}}. Each is identified by its SHA-256 fingerprint, so there can be no doubt which document is meant.' },
           { type: 'documents' },
           { type: 'p', text: 'From the effective date, the tenancy agreement is made up of those documents as amended by this variation.' }
         ]

@@ -226,7 +226,13 @@ function esignBuildAgreementInput_(ctx) {
       additionalTerms: p.additionalTerms || '',
       unitTitle: !!p.unitTitle,
       bodyCorporateRules: p.unitTitle && p.bodyCorporateRules ? p.bodyCorporateRules : null,   // { name, mime, base64 }
-      bottledGas: !!p.bottledGas
+      bottledGas: !!p.bottledGas,
+      room: d.room || '',                       // a room let on its own (blank = the whole premises)
+      roomCount: Number(p.roomCount) || 0,      // rooms at the premises, to split electricity over the cap
+      internetIncluded: !!p.internetIncluded,
+      power: p.power || 'tenant',               // tenant | included | capped
+      powerCap: p.powerCap === undefined || p.powerCap === null ? '' : String(p.powerCap),
+      powerDays: p.powerDays === undefined || p.powerDays === null || p.powerDays === '' ? '' : Number(p.powerDays)
     },
     tenants: (ctx.applicants || []).map(esignTenantFromApplicant_),
     source: {
@@ -302,6 +308,7 @@ function esignTenancyDraft_(a, ctx) {
     start: start,
     end: a.terms ? a.terms.endDate : '',
     rent: a.terms ? a.terms.rentPerWeek : '',
+    room: a.terms && a.terms.room ? a.terms.room : '',
     bond: a.terms ? a.terms.bond : '',
     landlord: ctx.landlordName || '',
     groupKey: a.source ? a.source.groupKey : '',

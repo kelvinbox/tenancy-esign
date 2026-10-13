@@ -626,7 +626,7 @@ test('0.12.0: the landlord opening their link early is told to wait for the tena
   // the wording in the agreement and certificate
   const html = b.call({ action: 'admin.progress', id }).html;
   assert.ok(html.includes('the tenants first, in any order, and then the landlord'));
-  assert.equal(env.template.version, '1.7.0');
+  assert.equal(env.template.version, '1.8.0');
 });
 
 test('0.13.0: test agreements are marked as tests and can be signed automatically; real ones never', () => {
@@ -654,4 +654,38 @@ test('0.13.0: test agreements are marked as tests and can be signed automaticall
   let last; for (let i = 0; i < 5; i++) { last = b.call({ action: 'admin.testSign', id: v.id }); if (last.status === 'Completed') break; }
   assert.equal(last.status, 'Completed');
   assert.equal(b.call({ action: 'admin.get', id: v.id }).agreement.tenants.length, 3);
+});
+
+test('0.14.0: rooms, internet included and electricity included or capped', () => {
+  const b = memoryBackend();
+  const terms = (x) => sampleInput({ terms: Object.assign({}, sampleInput().terms, x) });
+  const html = (x) => b.call({ action: 'admin.preview', input: terms(x) }).html;
+  // nothing set: the wording is exactly as before
+  let h = html({});
+  assert.ok(h.includes('pay for the electricity, telephone and internet services they use during the tenancy'));
+  assert.ok(!h.includes('Room let to the tenant') && !h.includes('included in the rent') && !h.includes('over the cap'));
+  assert.ok(h.includes('No more than 3 people may live at the premises at any time.'));
+  // a room, internet included, electricity capped and split between 4 rooms
+  h = html({ room: 'Room B', roomCount: 4, internetIncluded: true, power: 'capped', powerCap: '200' });
+  assert.ok(h.includes('Room let to the tenant') && h.includes('exclusive use of Room B and shares the rest of the premises'));
+  assert.ok(h.includes('No more than 3 people may live in Room B at any time.') && !h.includes('may live at the premises'));
+  assert.ok(h.includes('maximum number of occupants live in Room B') && h.includes('Room B, 14 Kowhai Lane'), 'the room is in the key details too');
+  assert.ok(h.includes('pay for the telephone services they use during the tenancy'), 'electricity and internet are not the tenant\'s to arrange');
+  assert.ok(h.includes('provide internet access at the premises, included in the rent'));
+  assert.ok(h.includes('up to <b>$200 a month</b> (the bill for the whole premises)'));
+  assert.ok(h.includes('split equally between the 4 rooms of the premises, and the tenant pays <b>one quarter</b> of it (one room&#39;s share) within <b>14 days</b>'), 'default 14 days');
+  // the whole premises with a cap: the tenant pays all of the amount over
+  h = html({ power: 'capped', powerCap: '250.50', powerDays: 10 });
+  assert.ok(h.includes('more than $250.50, the tenant pays the amount over within <b>10 days</b>') && !h.includes('one room'));
+  // electricity included
+  h = html({ power: 'included' });
+  assert.ok(h.includes('pay for the electricity used at the premises, which is included in the rent'));
+  assert.ok(h.includes('pay for the telephone and internet services they use'));
+  // checks
+  const bad = b.call({ action: 'admin.preview', input: terms({ power: 'capped', powerCap: '', powerDays: 0 }) });
+  assert.ok(bad.errors.some(e => e.includes('monthly electricity cap')) && bad.errors.some(e => e.includes('1 to 90')), bad.errors.join('|'));
+  // the room is in the title and the emails
+  const id = b.call({ action: 'admin.create', input: terms({ room: 'Room B', roomCount: 4 }) }).agreement.id;
+  assert.ok(b.call({ action: 'admin.get', id }).agreement.title.includes('Room B, 14 Kowhai Lane'));
+  assert.ok(b.lastEmail('mia@example.com', 'invite').subject.includes('for Room B, 14 Kowhai Lane'));
 });
