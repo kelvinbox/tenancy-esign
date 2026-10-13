@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Centrix filler</title>
+<style>
+:root{--bg:#f8fafc;--card:#fff;--ink:#0f172a;--muted:#475569;--line:#e2e8f0;--acc:#16a34a}
+@media (prefers-color-scheme: dark){:root{--bg:#0b1220;--card:#111a2e;--ink:#e2e8f0;--muted:#94a3b8;--line:#1e293b}}
+body{margin:0;padding:16px;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+.box{max-width:640px;margin:0 auto;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+h1{font-size:1.3rem;margin:0 0 8px}ol{padding-left:22px}li{margin:6px 0}p,.muted{color:var(--muted)}
+.bm{display:inline-block;margin:10px 0;padding:10px 18px;border-radius:10px;background:var(--acc);color:#fff;font-weight:700;text-decoration:none;cursor:grab}
+button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+</style></head><body><div class="box">
+<h1>Centrix credit check filler</h1>
+<p>Fills the Centrix Consumer Credit Report form with an applicant from Tenant Management in one click.</p>
+<b>Set up (once per computer)</b>
+<ol>
+<li>Show the bookmarks bar: <b>Ctrl+Shift+B</b>.</li>
+<li>Drag this button onto the bookmarks bar:<br><a class="bm" id="bm" href="#" onclick="alert('Drag this onto your bookmarks bar, don’t click it.');return false;">Fill Centrix</a></li>
+</ol>
+<b>Each credit check</b>
+<ol>
+<li>In Tenant Management, open the application, then <b>Credit check</b> &gt; <b>Copy for Centrix</b>.</li>
+<li>On the Centrix credit report page, click <b>Fill Centrix</b> on the bookmarks bar. The first time, allow it to see the clipboard (or paste when it asks).</li>
+<li>The filled boxes turn yellow. Check them and the report options, then press <b>GO</b> yourself.</li>
+</ol>
+<p class="muted">The details go straight from your clipboard into the Centrix page. Nothing is sent anywhere else.</p>
+<p class="muted" id="alt">Can't drag it? <button type="button" id="copy">Copy the bookmark code</button>, add a new bookmark called "Fill Centrix", and paste the code as its URL.</p>
+</div>
+<script>
+fetch('centrix-fill.js',{cache:'no-store'}).then(function(r){ return r.text(); }).then(function(src){
+  var href='javascript:'+encodeURIComponent(src);
+  document.getElementById('bm').href=href;
+  document.getElementById('copy').onclick=function(){ navigator.clipboard.writeText(href).then(function(){ document.getElementById('copy').textContent='Copied'; }); };
+});
+</script>
+</body></html>
