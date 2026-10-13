@@ -14,23 +14,26 @@ button{font:inherit;padding:6px 12px;border-radius:8px;border:1px solid var(--li
 <p>Fills the Centrix Consumer Credit Report form with an applicant from Tenant Management in one click.</p>
 <b>Set up (once per computer)</b>
 <ol>
-<li>Show the bookmarks bar: <b>Ctrl+Shift+B</b>.</li>
+<li>Show the bookmarks bar: <b>Ctrl+Shift+B</b>. If you already have a <b>Fill Centrix</b> bookmark from before 14 Oct 2026, delete it first (right-click it, <b>Delete</b>).</li>
 <li>Drag this button onto the bookmarks bar:<br><a class="bm" id="bm" href="#" onclick="alert('Drag this onto your bookmarks bar, don’t click it.');return false;">Fill Centrix</a></li>
 </ol>
 <b>Each credit check</b>
 <ol>
 <li>In Tenant Management, open the application, then <b>Credit check</b> &gt; <b>Copy for Centrix</b>.</li>
 <li>On the Centrix credit report page, click <b>Fill Centrix</b> on the bookmarks bar. The first time, allow it to see the clipboard (or paste when it asks).</li>
-<li>The filled boxes turn yellow. Check them and the report options, then press <b>GO</b> yourself.</li>
+<li>The filled boxes turn yellow. Both report options (court fines and property ownership) are set to <b>Yes</b> and the court fines terms box is ticked, so only use it for applicants who consented to a fines check. Check everything, then press <b>GO</b> yourself.</li>
 </ol>
 <p class="muted">The details go straight from your clipboard into the Centrix page. Nothing is sent anywhere else.</p>
 <p class="muted" id="alt">Can't drag it? <button type="button" id="copy">Copy the bookmark code</button>, add a new bookmark called "Fill Centrix", and paste the code as its URL.</p>
 </div>
 <script>
-fetch('centrix-fill.js',{cache:'no-store'}).then(function(r){ return r.text(); }).then(function(src){
+/* The bookmark only loads the latest filler from this site, so changes to it never need the bookmark replaced */
+(function(){
+  var src="(function(){var s=document.createElement('script');s.src='https://kelvinbox.github.io/tenancy-esign/centrix-fill.js?v='+Date.now();"+
+    "s.onerror=function(){alert('Could not load the Centrix filler. Check your internet connection and try again.');};document.body.appendChild(s);})();";
   var href='javascript:'+encodeURIComponent(src);
   document.getElementById('bm').href=href;
   document.getElementById('copy').onclick=function(){ navigator.clipboard.writeText(href).then(function(){ document.getElementById('copy').textContent='Copied'; }); };
-});
+})();
 </script>
 </body></html>

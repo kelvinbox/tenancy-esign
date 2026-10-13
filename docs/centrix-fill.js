@@ -99,8 +99,21 @@
         setVal(el, String(p[1])); p.done = true; filled++;
       });
     });
+    // report options (Y / N) and the court fines terms tick, as sent from Tenant Management
+    var o = d.options || {}, set = [];
+    [['IncludeCourtFinesDropDownList', o.courtFines, 'Court fines'], ['IncludePropertyOwnershipDropDownList', o.propertyOwnership, 'Property ownership']].forEach(function (x) {
+      var el = document.getElementById('MainContent_' + x[0]);
+      if (!x[1]) return;
+      if (el && [].some.call(el.options, function (op) { return op.value === x[1]; })) { setVal(el, x[1]); el.dispatchEvent(new Event('change', { bubbles: true })); set.push(x[2] + ' ' + (x[1] === 'Y' ? 'Yes' : 'No')); }
+      else missed.push(x[2] + ' option');
+    });
+    if (o.acceptTerms) {
+      var cb = document.getElementById('MainContent_AcceptCourtFinesTermsCheckBox');
+      if (cb) { if (!cb.checked) cb.click(); cb.style.outline = '3px solid ' + BG; set.push('terms ticked'); } else missed.push('accept terms tick');
+    }
     plan.forEach(function (p) { if (!p.done && p[1] !== undefined && p[1] !== null && String(p[1]) !== '') missed.push((p[2] ? 'Address 2 ' : '') + p[0]); });
     note('<b>\u2713 Filled ' + filled + ' box' + (filled === 1 ? '' : 'es') + ' for ' + esc(d.fullName || 'the applicant') + '</b> (shaded yellow).' +
+      (set.length ? '<div style="margin-top:6px">Report options: ' + esc(set.join(', ')) + '.</div>' : '') +
       (missed.length ? '<div style="margin-top:6px;color:#b45309">Couldn\u2019t find: ' + esc(missed.join(', ')) + '. Fill these in by hand.</div>' : '') +
       '<div style="margin-top:6px">Check the details and the report options, then press <b>GO</b>.</div>');
   }
