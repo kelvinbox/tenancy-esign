@@ -1,5 +1,6 @@
 /* Fill Centrix (bookmarklet). Fills the Centrix Consumer Credit Report form from an applicant copied in Tenant
-   Management (Credit check > Copy for Centrix). Each box is found by the caption shown under it (Surname, DD, Suburb...),
+   Management (Credit check > Copy for Centrix). Each box is found by Centrix's own id (MainContent_...TextBox),
+   else by the caption shown under it (Surname, DD, Suburb...),
    so it keeps working if Centrix renames its fields. Nothing is sent anywhere and GO is never pressed. */
 (function () {
   var TAG = 'CENTRIX-FILL ', BG = '#fff3b0';
