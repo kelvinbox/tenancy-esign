@@ -222,6 +222,7 @@ function esignBuildAgreementInput_(ctx) {
       insulationDate: esignYmd_(p.insulationDate),
       insulationStatement: p.insulationStatement || '',
       healthyHomesStatement: p.healthyHomesStatement || '',
+      healthyHomesExemptions: p.healthyHomesExemptions || [],   // standards with an exemption, named in the landlord declaration
       pets: p.pets || '',
       additionalTerms: p.additionalTerms || '',
       unitTitle: !!p.unitTitle,

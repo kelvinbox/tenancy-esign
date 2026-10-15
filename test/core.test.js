@@ -359,6 +359,14 @@ test('template 1.5.0: Tenancy Services comparison wording', () => {
   assert.ok(gas.indexOf('pay for the bottled gas they use (refills). The landlord pays the gas bottle hire') > 0);
 });
 
+test('0.15.0: the landlord declaration names any standard with an exemption', () => {
+  const html = (ex) => memoryBackend().call({ action: 'admin.preview', input: sampleInput({ terms: Object.assign({}, sampleInput().terms, { healthyHomesExemptions: ex }) }) }).html;
+  assert.ok(html(['Heating']).indexOf('section 45(1)(bb) or 66I(1)(bb) of the Act, but the following exemption from specific standards applies: Heating.') > 0);
+  assert.ok(html(['Heating', 'Ventilation']).indexOf('but the following exemptions from specific standards apply: Heating, Ventilation.') > 0);
+  assert.ok(html(['Made up']).indexOf('66I(1)(bb) of the Act.') > 0 && html(['Made up']).indexOf('from specific standards') < 0, 'only the four standards can be named');
+  assert.ok(html([]).indexOf('66I(1)(bb) of the Act.') > 0, 'none: as before');
+});
+
 test('landlord declares the section 4 statements separately; it is recorded and shown with their signature', () => {
   const b = memoryBackend();
   const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;

@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.14.0';
+  var VERSION = '0.15.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -38,9 +38,13 @@ var ESign = (function () {
     return s.kind === 'incoming' ? AGREE_JOIN_TEXT : AGREE_VARIATION_TEXT;
   }
 
+  var HH_STANDARDS = ['Heating', 'Insulation', 'Ventilation', 'Moisture ingress and drainage'];   // the exemptions the declaration can name
   /** The landlord's declaration that the insulation and healthy homes statements are true (templates with a declaration block). */
   function declarationText(env) {
-    return 'I/we, ' + str(env.landlord && env.landlord.name) + ', declare that the information in the insulation and healthy homes statements in section 4 of this agreement is true and correct as at the date of signing, and that I/we comply with the healthy homes standards as required by either section 45(1)(bb) or 66I(1)(bb) of the Act.';
+    // standards with an exemption (0.15.0): named as the official statement does
+    var ex = (env.terms && env.terms.healthyHomesExemptions) || [];
+    return 'I/we, ' + str(env.landlord && env.landlord.name) + ', declare that the information in the insulation and healthy homes statements in section 4 of this agreement is true and correct as at the date of signing, and that I/we comply with the healthy homes standards as required by either section 45(1)(bb) or 66I(1)(bb) of the Act' +
+      (ex.length ? ', but the following exemption' + (ex.length > 1 ? 's' : '') + ' from specific standards appl' + (ex.length > 1 ? 'y' : 'ies') + ': ' + ex.join(', ') + '.' : '.');
   }
   function hasDeclarationBlock(env) {
     return !!(env.template && (env.template.sections || []).some(function (sec) { return (sec.blocks || []).some(function (b) { return b.type === 'declaration'; }); }));
@@ -354,6 +358,7 @@ var ESign = (function () {
       insulationDate: insulationDate,
       insulationStatement: str(T.insulationStatement),
       healthyHomesStatement: str(T.healthyHomesStatement),
+      healthyHomesExemptions: (Array.isArray(T.healthyHomesExemptions) ? T.healthyHomesExemptions : []).filter(function (x) { return HH_STANDARDS.indexOf(x) >= 0; }),
       pets: str(T.pets) || 'No pets are allowed without the landlord\'s written consent.',
       additionalTerms: str(T.additionalTerms),
       unitTitle: unitTitle,
