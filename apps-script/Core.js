@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.15.2';
+  var VERSION = '0.15.3';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -1601,7 +1601,7 @@ var ESign = (function () {
         ownerName: senderName(env),
         brand: env.branding && env.branding.logo ? { logo: env.branding.logo, name: env.branding.displayName || env.landlord.name } : null,
         agreement: {
-          id: env.id, title: env.title, status: env.status, propertyAddress: env.propertyAddress,
+          id: env.id, title: env.title, status: env.status, propertyAddress: placeOf(env),   // with the room (0.15.3)
           expiresAt: env.expiresAt, completedAt: env.completedAt || null, finalAvailable: !!env.final,
           finalSha256: env.final ? env.final.sha256 : null,
           kind: env.kind || 'agreement', version: versionOf(env), docLabel: docPhrase(env), docShort: docShort(env),
@@ -2295,7 +2295,7 @@ var ESign = (function () {
         if (env.final && env.final.sha256 === hash) {
           var chain = verifyChain(env.id, store.listAudit(env.id));
           return {
-            found: true, id: env.id, title: env.title, propertyAddress: env.propertyAddress, completedAt: env.completedAt,
+            found: true, id: env.id, title: env.title, propertyAddress: placeOf(env), completedAt: env.completedAt,
             completedAtText: fmt(env.completedAt), termsHash: env.termsHash, auditHead: env.final.auditHeadAtRender,
             chainOk: chain.ok, events: chain.count,
             signers: env.signers.map(function (s) {

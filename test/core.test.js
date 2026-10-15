@@ -698,3 +698,15 @@ test('0.14.0: rooms, internet included and electricity included or capped', () =
   assert.ok(b.call({ action: 'admin.get', id }).agreement.title.includes('Room B, 14 Kowhai Lane'));
   assert.ok(b.lastEmail('mia@example.com', 'invite').subject.includes('for Room B, 14 Kowhai Lane'));
 });
+
+test('0.15.3: the signing page header and the verify page include the room', () => {
+  const b = memoryBackend();
+  const input = sampleInput({ terms: Object.assign({}, sampleInput().terms, { room: 'Room B', roomCount: 4 }) });
+  const id = b.call({ action: 'admin.create', input }).agreement.id;
+  const view = b.call({ action: 'sign.open', token: b.tokenFrom(b.lastEmail('mia@example.com', 'invite')), client: {} });
+  assert.equal(view.agreement.propertyAddress, 'Room B, ' + input.propertyAddress);
+  const plain = memoryBackend(), id2 = plain.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  const v2 = plain.call({ action: 'sign.open', token: plain.tokenFrom(plain.lastEmail('mia@example.com', 'invite')), client: {} });
+  assert.equal(v2.agreement.propertyAddress, sampleInput().propertyAddress, 'no room: just the address');
+  assert.ok(id && id2);
+});
