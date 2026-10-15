@@ -25,7 +25,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.9.0',
+    version: '1.10.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -134,7 +134,7 @@ var ESignTemplates = (function () {
         blocks: [{
           type: 'list', items: [
             'pay the rent on time',
-            'pay for the {{TenantUtilities}} services they use during the tenancy',
+            { text: 'pay for the {{TenantUtilities}} services they use during the tenancy', when: 'HasTenantUtilities' },
             { text: 'pay their share of any electricity over the cap: if a month\'s electricity bill for the whole premises is more than ${{PowerCap}}, the amount over is split equally between the {{RoomCount}} rooms of the premises, and the tenant pays **{{PowerShare}}** of it (one room\'s share) within **{{PowerDays}} days** of the landlord giving them a copy of the bill', when: 'PowerCappedRoom' },
             { text: 'pay for any electricity over the cap: if a month\'s electricity bill for the premises is more than ${{PowerCap}}, the tenant pays the amount over within **{{PowerDays}} days** of the landlord giving them a copy of the bill', when: 'PowerCappedWhole' },
             { text: 'pay for the bottled gas they use (refills). The landlord pays the gas bottle hire', when: 'HasBottledGas' },

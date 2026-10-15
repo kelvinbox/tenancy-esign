@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.15.5';
+  var VERSION = '0.15.6';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -574,13 +574,12 @@ var ESign = (function () {
     var w = ['', 'all', 'half', 'one third', 'one quarter', 'one fifth', 'one sixth', 'one seventh', 'one eighth', 'one ninth', 'one tenth'];
     return w[n] || '1/' + n;
   }
-  /** The services the tenant pays for themselves: "electricity, telephone and internet" unless the landlord includes some. */
+  /** The services the tenant pays for themselves: "electricity and internet" unless the landlord includes some ('' if both). */
   function tenantUtilities(t) {
     var u = [];
     if (!t.power || t.power === 'tenant') u.push('electricity');
-    u.push('telephone');
     if (!t.internetIncluded) u.push('internet');
-    return u.length > 1 ? u.slice(0, -1).join(', ') + ' and ' + u[u.length - 1] : u[0];
+    return u.length > 1 ? u.slice(0, -1).join(', ') + ' and ' + u[u.length - 1] : (u[0] || '');
   }
 
   function buildFields(env) {
@@ -636,7 +635,8 @@ var ESign = (function () {
       PowerCap: t.powerCap || '',
       PowerDays: String(t.powerDays || ''),
       PowerShare: shareWord(Number(t.roomCount) || 1),
-      TenantUtilities: tenantUtilities(t)
+      TenantUtilities: tenantUtilities(t),
+      HasTenantUtilities: !!tenantUtilities(t)
     };
     var sp = parseYmd(t.startDate), ep = parseYmd(t.endDate);
     if (sp) { f.TenancyStartDay = ordinal(sp.d); f.TenancyStartMonth = MONTHS[sp.m - 1]; f.TenancyStartYear = String(sp.y); }

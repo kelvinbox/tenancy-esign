@@ -351,7 +351,7 @@ test('template 1.5.0: Tenancy Services comparison wording', () => {
   has('within 10 working days of any change to their name');
   has('not assign the tenancy without the landlord&#39;s prior written consent');
   assert.ok(html.indexOf('will not unreasonably withhold consent') < 0, 'template 1.9.0: no promise about considering assignment requests');
-  has('pay for the electricity, telephone and internet services they use');
+  has('pay for the electricity and internet services they use');
   has('Privacy Act 2020');
   has('declare that the information in the insulation and healthy homes statements in section 4');
   has('and that I/we comply with the healthy homes standards as required by either section 45(1)(bb) or 66I(1)(bb) of the Act.');
@@ -635,7 +635,7 @@ test('0.12.0: the landlord opening their link early is told to wait for the tena
   // the wording in the agreement and certificate
   const html = b.call({ action: 'admin.progress', id }).html;
   assert.ok(html.includes('the tenants first, in any order, and then the landlord'));
-  assert.equal(env.template.version, '1.9.0');
+  assert.equal(env.template.version, '1.10.0');
 });
 
 test('0.13.0: test agreements are marked as tests and can be signed automatically; real ones never', () => {
@@ -671,7 +671,7 @@ test('0.14.0: rooms, internet included and electricity included or capped', () =
   const html = (x) => b.call({ action: 'admin.preview', input: terms(x) }).html;
   // nothing set: the wording is exactly as before
   let h = html({});
-  assert.ok(h.includes('pay for the electricity, telephone and internet services they use during the tenancy'));
+  assert.ok(h.includes('pay for the electricity and internet services they use during the tenancy'));
   assert.ok(!h.includes('Room let to the tenant') && !h.includes('included in the rent') && !h.includes('over the cap'));
   assert.ok(h.includes('No more than 3 people may live at the premises at any time.'));
   // a room, internet included, electricity capped and split between 4 rooms
@@ -679,7 +679,7 @@ test('0.14.0: rooms, internet included and electricity included or capped', () =
   assert.ok(h.includes('Room let to the tenant') && h.includes('exclusive use of Room B and shares the rest of the premises'));
   assert.ok(h.includes('No more than 3 people may live in Room B at any time.') && !h.includes('may live at the premises'));
   assert.ok(h.includes('maximum number of occupants live in Room B') && h.includes('Room B, 14 Kowhai Lane'), 'the room is in the key details too');
-  assert.ok(h.includes('pay for the telephone services they use during the tenancy'), 'electricity and internet are not the tenant\'s to arrange');
+  assert.ok(!h.includes('services they use during the tenancy'), 'electricity and internet are not the tenant\'s to arrange');
   assert.ok(h.includes('provide internet access at the premises, included in the rent'));
   assert.ok(h.includes('up to <b>$200 a month</b> (the bill for the whole premises)'));
   assert.ok(h.includes('split equally between the 4 rooms of the premises, and the tenant pays <b>one quarter</b> of it (one room&#39;s share) within <b>14 days</b>'), 'default 14 days');
@@ -689,7 +689,7 @@ test('0.14.0: rooms, internet included and electricity included or capped', () =
   // electricity included
   h = html({ power: 'included' });
   assert.ok(h.includes('pay for the electricity used at the premises, which is included in the rent'));
-  assert.ok(h.includes('pay for the telephone and internet services they use'));
+  assert.ok(h.includes('pay for the internet services they use') && !h.includes('telephone'));
   // checks
   const bad = b.call({ action: 'admin.preview', input: terms({ power: 'capped', powerCap: '', powerDays: 0 }) });
   assert.ok(bad.errors.some(e => e.includes('monthly electricity cap')) && bad.errors.some(e => e.includes('1 to 90')), bad.errors.join('|'));
@@ -726,4 +726,15 @@ test('0.15.5: every page script parses (a syntax error stops the signing page lo
   fs.readdirSync(dir).filter((f) => f.endsWith('.js')).forEach((f) => {
     assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(dir, f), 'utf8'), { filename: f }), f);
   });
+});
+
+test('template 1.10.0: the tenant no longer agrees to pay for telephone services', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  assert.equal(b.db.envelopes[id].template.version, '1.10.0');
+  const html = (x) => b.call({ action: 'admin.preview', input: sampleInput({ terms: Object.assign({}, sampleInput().terms, x) }) }).html;
+  const h = html({});
+  assert.ok(h.includes('pay for the electricity and internet services they use during the tenancy') && !/telephone services/.test(h));
+  // electricity and internet both included: no utilities clause at all
+  assert.ok(!html({ power: 'included', internetIncluded: true }).includes('services they use during the tenancy'));
 });
