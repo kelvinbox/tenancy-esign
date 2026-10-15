@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.15.1';
+  var VERSION = '0.15.2';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -707,7 +707,6 @@ var ESign = (function () {
       .map(function (x) { return val(x[0], mode) + ' - ' + esc(first(x[1])); }).join('<br>') || fillText('{{LandlordMobile}}', f, mode);
   }
 
-  var AFS_NOTE = '<br><span class="muted">Will be used as an address for service</span>';
 
   function renderParty(s, env, mode) {
     return renderPerson(roleLabel(s.role), signerDetails(s), mode, s.kind === 'tenant' && !s.details);
@@ -715,7 +714,7 @@ var ESign = (function () {
 
   function renderPerson(label, d, mode, pending) {
     var rows = kvRow('Full name', val(d.name, mode)) +
-      kvRow('Email', val(d.email, mode) + (d.email ? AFS_NOTE : '')) +
+      kvRow('Email', val(d.email, mode)) +
       kvRow('Mobile', val(d.mobile, mode)) +
       kvRow('Address for service', d.addressForService ? val(d.addressForService, mode) :
         (mode === 'view' ? '<span class="fv pending">To be given by the tenant when they sign</span>' : '&mdash;')) +
@@ -901,7 +900,7 @@ var ESign = (function () {
         return '<div class="party"><div class="party-h">Landlord</div><table class="kv">' +
           kvRow('Name', fillText('{{LandlordName}}', f, mode)) +
           kvRow('Address for service', fillText('{{LandlordAddress}}', f, mode)) +
-          kvRow('Email', fillText('{{LandlordEmail}}', f, mode) + (f.LandlordSigner2Email ? '<br>' + fillText('{{LandlordSigner2Email}}', f, mode) : '') + AFS_NOTE) +
+          kvRow('Email', fillText('{{LandlordEmail}}', f, mode) + (f.LandlordSigner2Email ? '<br>' + fillText('{{LandlordSigner2Email}}', f, mode) : '')) +   // 0.15.2: no note per email; the general address-for-service statement covers it
           kvRow('Phone', fillText('{{LandlordPhone}}', f, mode)) +
           kvRow('Mobile', landlordMobiles(env.landlord, f, mode)) +
           '</table></div>';

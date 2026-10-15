@@ -343,7 +343,7 @@ test('template 1.5.0: Tenancy Services comparison wording', () => {
   const has = (t) => assert.ok(html.indexOf(t) >= 0, 'missing: ' + t);
   has('excluded from the Act by section 5 of the Act, the parties agree that the Act applies to it in full');
   has('The email address given for each party will be used as an address for service');
-  has('Will be used as an address for service');
+  assert.ok(html.indexOf('Will be used as an address for service') < 0, '0.15.2: no note beside each email');
   has('If these insurance details change, the landlord will give the tenant the correct information within a reasonable time.');
   has('the insurance excess (if any), whichever is lower');
   has('full cost of damage that they or their guests cause intentionally, or that results from an act or omission that is an imprisonable offence');
