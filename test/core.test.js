@@ -719,3 +719,11 @@ test('0.15.4: addresses for delivery leave the room out', () => {
   assert.equal(view.agreement.streetAddress, input.propertyAddress);
   assert.ok(/view\.agreement\.streetAddress \|\| view\.agreement\.propertyAddress/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'js', 'sign.js'), 'utf8')), '"use property address" fills the street address');
 });
+
+test('0.15.5: every page script parses (a syntax error stops the signing page loading)', () => {
+  const fs = require('fs'), path = require('path'), vm = require('vm');
+  const dir = path.join(__dirname, '..', 'docs', 'js');
+  fs.readdirSync(dir).filter((f) => f.endsWith('.js')).forEach((f) => {
+    assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(dir, f), 'utf8'), { filename: f }), f);
+  });
+});
