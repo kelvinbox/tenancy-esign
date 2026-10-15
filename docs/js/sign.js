@@ -291,7 +291,7 @@
       '<div id="errs"></div>' + view.fields.map(fieldHtml).join('') + '</div>';
     setBar('<button class="btn ghost" id="back">Back</button><button class="btn grow" id="go">Continue</button>');
     var up = $('#useProp');
-    if (up) up.addEventListener('click', function () { $('#f_addressForService').value = view.agreement.propertyAddress; });
+    if (up) up.addEventListener('click', function () { $('#f_addressForService').value = view.agreement.streetAddress || view.agreement.propertyAddress;   // the street address, not the room });
     UI.$all('.seg', app).forEach(function (seg) {
       seg.addEventListener('change', function () {
         UI.$all('label', seg).forEach(function (l) { l.classList.toggle('on', l.querySelector('input').checked); });

@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.15.3';
+  var VERSION = '0.15.4';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -1600,7 +1600,8 @@ var ESign = (function () {
         ownerName: senderName(env),
         brand: env.branding && env.branding.logo ? { logo: env.branding.logo, name: env.branding.displayName || env.landlord.name } : null,
         agreement: {
-          id: env.id, title: env.title, status: env.status, propertyAddress: placeOf(env),   // with the room (0.15.3)
+          id: env.id, title: env.title, status: env.status, propertyAddress: placeOf(env),   // with the room, for headings (0.15.3)
+          streetAddress: env.propertyAddress,   // without it: for postal / address-for-service use (0.15.4)
           expiresAt: env.expiresAt, completedAt: env.completedAt || null, finalAvailable: !!env.final,
           finalSha256: env.final ? env.final.sha256 : null,
           kind: env.kind || 'agreement', version: versionOf(env), docLabel: docPhrase(env), docShort: docShort(env),

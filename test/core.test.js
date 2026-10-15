@@ -710,3 +710,12 @@ test('0.15.3: the signing page header and the verify page include the room', () 
   assert.equal(v2.agreement.propertyAddress, sampleInput().propertyAddress, 'no room: just the address');
   assert.ok(id && id2);
 });
+
+test('0.15.4: addresses for delivery leave the room out', () => {
+  const b = memoryBackend();
+  const input = sampleInput({ terms: Object.assign({}, sampleInput().terms, { room: 'Room B', roomCount: 4 }) });
+  b.call({ action: 'admin.create', input });
+  const view = b.call({ action: 'sign.open', token: b.tokenFrom(b.lastEmail('mia@example.com', 'invite')), client: {} });
+  assert.equal(view.agreement.streetAddress, input.propertyAddress);
+  assert.ok(/view\.agreement\.streetAddress \|\| view\.agreement\.propertyAddress/.test(require('fs').readFileSync(require('path').join(__dirname, '..', 'docs', 'js', 'sign.js'), 'utf8')), '"use property address" fills the street address');
+});
