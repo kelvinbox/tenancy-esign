@@ -350,6 +350,7 @@ test('template 1.5.0: Tenancy Services comparison wording', () => {
   has('within 10 working days of any change to the landlord&#39;s name');
   has('within 10 working days of any change to their name');
   has('not assign the tenancy without the landlord&#39;s prior written consent');
+  assert.ok(html.indexOf('will not unreasonably withhold consent') < 0, 'template 1.9.0: no promise about considering assignment requests');
   has('pay for the electricity, telephone and internet services they use');
   has('Privacy Act 2020');
   has('declare that the information in the insulation and healthy homes statements in section 4');
@@ -634,7 +635,7 @@ test('0.12.0: the landlord opening their link early is told to wait for the tena
   // the wording in the agreement and certificate
   const html = b.call({ action: 'admin.progress', id }).html;
   assert.ok(html.includes('the tenants first, in any order, and then the landlord'));
-  assert.equal(env.template.version, '1.8.0');
+  assert.equal(env.template.version, '1.9.0');
 });
 
 test('0.13.0: test agreements are marked as tests and can be signed automatically; real ones never', () => {

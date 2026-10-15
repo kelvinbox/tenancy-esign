@@ -26,7 +26,7 @@ var ESignTemplates = (function () {
 
   T['nz-residential-v1'] = {
     id: 'nz-residential-v1',
-    version: '1.8.0',
+    version: '1.9.0',
     title: 'Residential Tenancy Agreement',
     subtitle: 'Residential Tenancies Act 1986 (New Zealand)',
     intro: 'This agreement records the terms of the tenancy of the premises described below. The Residential Tenancies Act 1986 ' +
@@ -148,7 +148,7 @@ var ESignTemplates = (function () {
             { text: 'not let more than the maximum number of occupants live at the premises', unless: 'IsRoom' },
             { text: 'not let more than the maximum number of occupants live in {{RoomName}}', when: 'IsRoom' },
             'not sublet the premises or any part of them, or otherwise part with possession of them (other than by assignment), without the landlord\'s explicit written permission',
-            'not assign the tenancy without the landlord\'s prior written consent. The landlord will consider any request to assign the tenancy and will not unreasonably withhold consent',
+            'not assign the tenancy without the landlord\'s prior written consent',
             { text: 'comply with the body corporate rules that apply to the premises', when: 'IsUnitTitle' },
             'tell the landlord in writing within 10 working days of any change to their name, contact details or address for service',
             'at the end of the tenancy, leave the premises reasonably clean and tidy, remove all their belongings and rubbish, and return all keys and remotes'
