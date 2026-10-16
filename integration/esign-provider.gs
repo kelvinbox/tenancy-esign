@@ -376,8 +376,10 @@ function esignTestSign_(stored) {
   return esignCall_('admin.testSign', { id: stored.requestId }, 'test suite');
 }
 
-function esignCancelAgreement_(stored, reason, actor) {
-  var a = esignCall_('admin.cancel', { id: stored.requestId, reason: reason || 'Cancelled in Tenant Management' }, actor);
+function esignCancelAgreement_(stored, reason, actor, opts) {
+  opts = opts || {};   // { notify: false to email nobody, message: added to the cancellation email } (e-sign 0.17.0)
+  var a = esignCall_('admin.cancel', { id: stored.requestId, reason: reason || 'Cancelled in Tenant Management',
+    notify: opts.notify !== false, message: String(opts.message || '').trim() }, actor);
   return esignAgreementRecord_(a, stored);
 }
 

@@ -760,3 +760,31 @@ test('0.16.0: tenants give an emergency contact when signing; it comes back with
   const cert = ESign.renderCertificate(b.db.envelopes[id], b.db.audit[id], {});
   assert.ok(!JSON.stringify(cert).includes('Rua Example'), 'not in the signing certificate');
 });
+
+test('0.17.0: cancelling can email the tenants with the landlord\'s own message, or tell nobody; both are audited', () => {
+  // with a message
+  let b = memoryBackend();
+  let id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  b.call({ action: 'admin.cancel', id, reason: 'Address wrong', notify: true, message: 'We\'ve fixed the address.\nA new one is on its way.' });
+  let mail = b.lastEmail('mia@example.com', 'cancelled');
+  assert.ok(mail && mail.text.includes('We\'ve fixed the address.\nA new one is on its way.') && mail.html.includes('We&#39;ve fixed the address.'));
+  assert.ok(b.lastEmail('tui@example.net', 'cancelled'), 'every tenant sent a link');
+  assert.equal(b.lastEmail('landlord@example.com', 'cancelled'), undefined, 'not the landlord');
+  let ev = b.db.audit[id].filter(e => e.type === 'CANCELLED')[0];
+  assert.deepEqual(ev.details.notified, ['Tenant1', 'Tenant2']);
+  assert.equal(ev.details.message, 'We\'ve fixed the address.\nA new one is on its way.');
+  // nobody told
+  b = memoryBackend();
+  id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  b.call({ action: 'admin.cancel', id, reason: 'x', notify: false, message: 'ignored' });
+  assert.equal(b.lastEmail('mia@example.com', 'cancelled'), undefined);
+  assert.equal(b.call({ action: 'admin.get', id }).agreement.status, 'Cancelled');
+  ev = b.db.audit[id].filter(e => e.type === 'CANCELLED')[0];
+  assert.deepEqual(ev.details.notified, []); assert.equal(ev.details.message, null);
+  // no options: as before (tenants told, standard wording only)
+  b = memoryBackend();
+  id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  b.call({ action: 'admin.cancel', id, reason: 'x' });
+  mail = b.lastEmail('mia@example.com', 'cancelled');
+  assert.ok(mail && /has been cancelled, so please don't sign it/.test(mail.text));
+});

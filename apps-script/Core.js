@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.16.0';
+  var VERSION = '0.17.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -1923,24 +1923,32 @@ var ESign = (function () {
       return out;
     }
 
-    function cancel(id, reason, actor) {
+    /**
+     * opts (0.17.0): { notify: false to tell nobody (default: every tenant already sent a link is emailed),
+     *                  message: the landlord's own words, added to that email }. Both are recorded in the audit trail.
+     */
+    function cancel(id, reason, actor, opts) {
+      opts = opts || {};
       var env = loadEnv(id);
       if (env.status !== 'Sent') fail('Only an agreement that is still out for signing can be cancelled.');
       reason = str(reason) || 'No reason given';
+      var tell = opts.notify !== false, message = tell ? str(opts.message).slice(0, 2000) : '';
+      var told = tell ? env.signers.filter(function (s) { return s.sentAt && s.status !== 'Signed' && s.kind !== 'landlord'; }) : [];
       env.status = 'Cancelled';
       env.cancelledAt = iso();
-      audit(env, 'CANCELLED', actor || 'landlord', { reason: reason });
-      env.signers.forEach(function (s) {
-        if (s.sentAt && s.status !== 'Signed' && s.kind !== 'landlord') {
-          mail(env, {
-            to: s.email, kind: 'cancelled',
-            subject: 'Cancelled: ' + docShort(env) + ' for ' + placeOf(env),
-            text: 'Hi ' + signerDetails(s).name.split(' ')[0] + ',\n\nThe ' + docShort(env) + ' for ' + placeOf(env) +
-              ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' + senderName(env),
-            html: wrapHtml('<p>Hi ' + esc(signerDetails(s).name.split(' ')[0]) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(placeOf(env)) +
-              '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p><p>' + esc(senderName(env)) + '</p>')
-          });
-        }
+      audit(env, 'CANCELLED', actor || 'landlord', { reason: reason, notified: told.map(function (s) { return s.role; }), message: message || null });
+      told.forEach(function (s) {
+        var first = signerDetails(s).name.split(' ')[0];
+        mail(env, {
+          to: s.email, kind: 'cancelled',
+          subject: 'Cancelled: ' + docShort(env) + ' for ' + placeOf(env),
+          text: 'Hi ' + first + ',\n\nThe ' + docShort(env) + ' for ' + placeOf(env) +
+            ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' +
+            (message ? message + '\n\n' : '') + senderName(env),
+          html: wrapHtml('<p>Hi ' + esc(first) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(placeOf(env)) +
+            '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p>' +
+            (message ? '<p style="white-space:pre-wrap">' + esc(message) + '</p>' : '') + '<p>' + esc(senderName(env)) + '</p>')
+        });
       });
       store.saveEnvelope(env);
       releaseParent(env, 'Cancelled');
@@ -2427,7 +2435,7 @@ var ESign = (function () {
       case 'admin.preview': return engine.preview(req.input);
       case 'admin.create': return engine.create(req.input, actor);
       case 'admin.issueLink': return engine.issueLink(req.id, req.signerId, req.channel, actor);
-      case 'admin.cancel': return engine.cancel(req.id, req.reason, actor);
+      case 'admin.cancel': return engine.cancel(req.id, req.reason, actor, { notify: req.notify, message: req.message });
       case 'admin.download': return engine.adminDownload(req.id);
       case 'admin.purge': return engine.purge(req.id, actor);
       case 'admin.progress': return engine.progress(req.id);
