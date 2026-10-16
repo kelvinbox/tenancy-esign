@@ -17,7 +17,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.15.6';
+  var VERSION = '0.16.0';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -507,7 +507,12 @@ var ESign = (function () {
       { key: 'idNumber', label: 'ID number', required: true },
       // the date of birth is kept with the signed record; the agreement shows only "Under 18", worked out from it
       { key: 'dob', label: 'Date of birth', required: true, type: 'date',
-        hint: 'Kept on file with the signed agreement. The agreement itself only shows whether you are under 18.' }
+        hint: 'Kept on file with the signed agreement. The agreement itself only shows whether you are under 18.' },
+      // 0.16.0: an emergency contact, kept with the landlord's records; never shown in the agreement
+      { key: 'emergencyName', label: 'Name', summary: 'Emergency contact', errLabel: 'Emergency contact name', required: true, section: 'Emergency contact',
+        note: 'This isn\'t part of the tenancy agreement. It\'s only used to contact someone for you in an emergency.' },
+      { key: 'emergencyRelationship', label: 'Relationship to you', summary: 'Their relationship to you', errLabel: 'Emergency contact relationship', required: true },
+      { key: 'emergencyPhone', label: 'Phone', summary: 'Their phone', errLabel: 'Emergency contact phone', required: true, type: 'tel' }
     ],
     landlord: [
       { key: 'name', label: 'Your full name', required: true, hint: 'The person signing for the landlord.' },
@@ -547,7 +552,8 @@ var ESign = (function () {
     defs.forEach(function (d) {
       var val = d.readonly ? str(prefill[d.key]) : str(input[d.key]);
       if (val.length > 400) val = val.slice(0, 400);
-      if (d.required && !val) errors.push(d.label + ' is required.');
+      if (d.required && !val) errors.push((d.errLabel || d.label) + ' is required.');
+      if (d.key === 'emergencyPhone' && val && val.replace(/\D/g, '').length < 7) errors.push('Emergency contact phone: enter the full number.');
       if (d.options && val && d.options.indexOf(val) < 0) errors.push(d.label + ': choose one of the options.');
       out[d.key] = val;
     });
@@ -950,10 +956,16 @@ var ESign = (function () {
       var d = signerDetails(s);
       out.push({
         name: d.name, email: s.email, mobile: d.mobile, idType: d.idType, idNumber: d.idNumber, under18: d.under18,
-        addressForService: d.addressForService || '', ref: s.ref || null, dob: d.dob || s.dob || null, pending: !s.details
+        addressForService: d.addressForService || '', ref: s.ref || null, dob: d.dob || s.dob || null, pending: !s.details,
+        emergency: emergencyOf(d)
       });
     });
     return out;
+  }
+
+  /** A tenant's emergency contact from their signing details (0.16.0), or null if they signed before it was asked. */
+  function emergencyOf(d) {
+    return d && (d.emergencyName || d.emergencyPhone) ? { name: d.emergencyName || '', relationship: d.emergencyRelationship || '', phone: d.emergencyPhone || '' } : null;
   }
 
   /** The tenants on a completed version of the tenancy. */
@@ -963,7 +975,8 @@ var ESign = (function () {
       var d = signerDetails(s);
       return {
         name: d.name, email: s.email, mobile: d.mobile, idType: d.idType, idNumber: d.idNumber, under18: d.under18,
-        addressForService: d.addressForService || '', ref: s.ref || null, dob: d.dob || s.dob || null
+        addressForService: d.addressForService || '', ref: s.ref || null, dob: d.dob || s.dob || null,
+        emergency: emergencyOf(d)
       };
     });
   }
@@ -2085,6 +2098,7 @@ var ESign = (function () {
         if (me.kind === 'tenant' || me.kind === 'incoming') {
           d.idType = d.idType || 'Driver licence'; d.idNumber = d.idNumber || 'TS' + String(100000 + Math.floor(Math.random() * 899999));
           d.dob = d.dob || '1995-06-15';
+          d.emergencyName = d.emergencyName || 'Test Contact'; d.emergencyRelationship = d.emergencyRelationship || 'Parent'; d.emergencyPhone = d.emergencyPhone || '021 555 0199';
         }
       }
       submit(token, {

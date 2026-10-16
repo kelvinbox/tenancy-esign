@@ -322,7 +322,8 @@ function esignTenancyDraft_(a, ctx) {
       return {
         ref: t.ref || '', name: t.name, email: t.email, mobile: t.mobile,
         dob: t.dob || esignYmd_((app.answers || {}).DateOfBirth), moveIn: start,
-        addressForService: t.addressForService || ''
+        addressForService: t.addressForService || '',
+        emergency: t.emergency || null   // given when signing (e-sign 0.16.0); not part of the agreement
       };
     })
   };
@@ -442,7 +443,7 @@ function esignApplyChangeToTenancy_(tenancy, v) {
   var tenants = v.tenants.map(function (t) {
     var old = byEmail[t.email];
     if (old) return Object.assign({}, old, { name: t.name, mobile: t.mobile });
-    return { ref: t.ref || '', name: t.name, email: t.email, mobile: t.mobile, dob: t.dob || '', moveIn: eff, addressForService: t.addressForService || '' };
+    return { ref: t.ref || '', name: t.name, email: t.email, mobile: t.mobile, dob: t.dob || '', moveIn: eff, addressForService: t.addressForService || '', emergency: t.emergency || null };
   });
   var former = before.filter(function (t) { return leaving.indexOf(String(t.email).toLowerCase()) >= 0; })
     .map(function (t) { return Object.assign({}, t, { moveOut: eff }); });

@@ -273,7 +273,9 @@
       var auto = { name: 'name', mobile: 'tel', email: 'email', dob: 'bday' }[f.key] || 'off';
       input = '<input id="' + id + '" data-k="' + f.key + '" type="' + (f.type || 'text') + '" value="' + esc(v) + '" autocomplete="' + auto + '"' + (f.readonly ? ' readonly' : '') + '>';
     }
-    return '<label class="f" for="' + id + '"><span class="l">' + esc(f.label) + (f.required || f.readonly ? '' : ' <span class="muted">(optional)</span>') + '</span>' + input + hint + '</label>';
+    // a field can start a new part of the form (0.16.0: the emergency contact), with a heading and a note
+    var head = f.section ? '<h3 style="margin:22px 0 4px;font-size:16px">' + esc(f.section) + '</h3>' + (f.note ? '<p class="small muted" style="margin:0 0 10px">' + esc(f.note) + '</p>' : '') : '';
+    return head + '<label class="f" for="' + id + '"><span class="l">' + esc(f.label) + (f.required || f.readonly ? '' : ' <span class="muted">(optional)</span>') + '</span>' + input + hint + '</label>';
   }
 
   function readDetails() {
@@ -426,7 +428,7 @@
     var rows = view.fields.filter(function (f) { return f.key !== 'email'; }).map(function (f) {
       var v = details[f.key] || '';
       if (f.type === 'date' && v) v = ESign.longDate(v);
-      return '<tr><th>' + esc(f.label) + '</th><td>' + esc(v || '-') + '</td></tr>';
+      return '<tr><th>' + esc(f.summary || f.label) + '</th><td>' + esc(v || '-') + '</td></tr>';
     }).join('');
     app.innerHTML = stepsHtml() +
       '<div class="card doc"><h2>Your details</h2><table class="kv">' + rows + '</table><button class="btn link small" id="edit" type="button">Change</button></div>' +

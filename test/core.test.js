@@ -185,7 +185,7 @@ test('signing rules: order, wrong codes, stale terms, name match, re-verificatio
   b.call({ action: 'sign.location', token: t1, location: { lat: -45.87, lng: 170.5, accuracy: 20 } });
 
   const payload = {
-    details: Object.assign({}, view.me.details, { addressForService: 'Somewhere' }), typedName: 'Someone Else', agree: true,
+    details: Object.assign({}, view.me.details, { addressForService: 'Somewhere', emergencyName: 'Pat Example', emergencyRelationship: 'Mother', emergencyPhone: '03 477 0000' }), typedName: 'Someone Else', agree: true,
     termsHash: view.termsHash, signaturePng: SIGNATURE, strokes: { count: 2 }, submissionId: 's1'
   };
   assert.throws(() => b.call({ action: 'sign.submit', token: t1, payload }), /must match/);
@@ -563,7 +563,7 @@ test('0.10.0: signers share their device location before signing; every attempt 
   // a refusal is recorded, and signing is blocked until a location is shared
   b.call({ action: 'sign.consent', token: t1 });
   b.call({ action: 'sign.location', token: t1, location: { error: { code: 1, message: 'User denied Geolocation' } } });
-  const p = { details: Object.assign({}, view.me.details, { addressForService: 'x' }), typedName: 'Mia Example', agree: true, termsHash: view.termsHash, signaturePng: SIGNATURE, strokes: { count: 1 } };
+  const p = { details: Object.assign({}, view.me.details, { addressForService: 'x', emergencyName: 'Pat Example', emergencyRelationship: 'Mother', emergencyPhone: '03 477 0000' }), typedName: 'Mia Example', agree: true, termsHash: view.termsHash, signaturePng: SIGNATURE, strokes: { count: 1 } };
   b.call({ action: 'sign.sendCode', token: t1 });
   b.call({ action: 'sign.verifyCode', token: t1, code: b.db.outbox.filter(m => m.kind === 'code').slice(-1)[0].code });
   b.call({ action: 'sign.reviewed', token: t1, info: { termsHash: view.termsHash } });
@@ -737,4 +737,26 @@ test('template 1.10.0: the tenant no longer agrees to pay for telephone services
   assert.ok(h.includes('pay for the electricity and internet services they use during the tenancy') && !/telephone services/.test(h));
   // electricity and internet both included: no utilities clause at all
   assert.ok(!html({ power: 'included', internetIncluded: true }).includes('services they use during the tenancy'));
+});
+
+test('0.16.0: tenants give an emergency contact when signing; it comes back with the tenants but is never in the agreement', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  const view = b.call({ action: 'sign.open', token: b.tokenFrom(b.lastEmail('mia@example.com', 'invite')), client: {} });
+  const f = view.fields.find((x) => x.key === 'emergencyName');
+  assert.ok(f && f.section === 'Emergency contact' && /isn't part of the tenancy agreement/.test(f.note));
+  const base = Object.assign({}, view.me.details, { addressForService: 'x', dob: '1990-01-01' });
+  const errs = ESign.validateDetails('tenant', base, view.me.details, '2026-10-16').errors.join('|');
+  assert.ok(/Emergency contact name is required/.test(errs) && /Emergency contact relationship is required/.test(errs) && /Emergency contact phone is required/.test(errs), errs);
+  assert.ok(/enter the full number/.test(ESign.validateDetails('tenant', Object.assign({}, base, { emergencyName: 'A', emergencyRelationship: 'B', emergencyPhone: '123' }), view.me.details, '2026-10-16').errors.join()));
+  assert.ok(!ESign.validateDetails('landlord', { name: 'Sam', capacity: 'Landlord' }, {}).errors.length, 'landlords are not asked');
+  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')), { details: { emergencyName: 'Rua Example', emergencyRelationship: 'Brother', emergencyPhone: '027 123 4567' } });
+  signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')), { typedName: 'tui SAMPLE' });
+  signAs(b, b.tokenFrom(b.lastEmail('landlord@example.com', 'invite')));
+  const full = b.call({ action: 'admin.get', id });
+  assert.deepEqual(full.agreement.tenants[0].emergency, { name: 'Rua Example', relationship: 'Brother', phone: '027 123 4567' });
+  const html = b.call({ action: 'admin.progress', id }).html;
+  assert.ok(!html.includes('Rua Example') && !html.includes('027 123 4567') && !/emergency contact/i.test(html), 'not in the agreement');
+  const cert = ESign.renderCertificate(b.db.envelopes[id], b.db.audit[id], {});
+  assert.ok(!JSON.stringify(cert).includes('Rua Example'), 'not in the signing certificate');
 });
