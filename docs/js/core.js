@@ -16,7 +16,7 @@
 var ESign = (function () {
   'use strict';
 
-  var VERSION = '0.17.0';
+  var VERSION = '0.17.1';
   var DEFAULT_TEMPLATE = 'nz-residential-v1';
   var VARIATION_TEMPLATE = 'nz-change-of-tenants-v1';
   var MAX_TENANTS = 5;
@@ -1923,7 +1923,7 @@ var ESign = (function () {
     }
 
     /**
-     * opts (0.17.0): { notify: false to tell nobody (default: every tenant already sent a link is emailed),
+     * opts (0.17.0): { notify: false to tell nobody (default: every tenant sent a link is emailed, signed or not),
      *                  message: the landlord's own words, added to that email }. Both are recorded in the audit trail.
      */
     function cancel(id, reason, actor, opts) {
@@ -1932,20 +1932,21 @@ var ESign = (function () {
       if (env.status !== 'Sent') fail('Only an agreement that is still out for signing can be cancelled.');
       reason = str(reason) || 'No reason given';
       var tell = opts.notify !== false, message = tell ? str(opts.message).slice(0, 2000) : '';
-      var told = tell ? env.signers.filter(function (s) { return s.sentAt && s.status !== 'Signed' && s.kind !== 'landlord'; }) : [];
+      // 0.17.1: every tenant who was sent a link, including those who have already signed (their signature won't be used)
+      var told = tell ? env.signers.filter(function (s) { return s.sentAt && s.kind !== 'landlord'; }) : [];
       env.status = 'Cancelled';
       env.cancelledAt = iso();
       audit(env, 'CANCELLED', actor || 'landlord', { reason: reason, notified: told.map(function (s) { return s.role; }), message: message || null });
       told.forEach(function (s) {
-        var first = signerDetails(s).name.split(' ')[0];
+        var first = signerDetails(s).name.split(' ')[0], signed = s.status === 'Signed';
+        var what = signed ? ' that you signed has been cancelled before everyone signed it, so it won\'t go ahead and your signature won\'t be used. If a new version is needed you will get a new link to sign it.'
+          : ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.';
         mail(env, {
           to: s.email, kind: 'cancelled',
           subject: 'Cancelled: ' + docShort(env) + ' for ' + placeOf(env),
-          text: 'Hi ' + first + ',\n\nThe ' + docShort(env) + ' for ' + placeOf(env) +
-            ' that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.\n\n' +
+          text: 'Hi ' + first + ',\n\nThe ' + docShort(env) + ' for ' + placeOf(env) + what + '\n\n' +
             (message ? message + '\n\n' : '') + senderName(env),
-          html: wrapHtml('<p>Hi ' + esc(first) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(placeOf(env)) +
-            '</b> that was sent to you has been cancelled, so please don\'t sign it. If a new version is needed you will get a new link.</p>' +
+          html: wrapHtml('<p>Hi ' + esc(first) + ',</p><p>The ' + docShort(env) + ' for <b>' + esc(placeOf(env)) + '</b>' + esc(what) + '</p>' +
             (message ? '<p style="white-space:pre-wrap">' + esc(message) + '</p>' : '') + '<p>' + esc(senderName(env)) + '</p>')
         });
       });

@@ -788,3 +788,16 @@ test('0.17.0: cancelling can email the tenants with the landlord\'s own message,
   mail = b.lastEmail('mia@example.com', 'cancelled');
   assert.ok(mail && /has been cancelled, so please don't sign it/.test(mail.text));
 });
+
+test('0.17.1: a tenant who has already signed is told when the agreement is cancelled, in words that fit', () => {
+  const b = memoryBackend();
+  const id = b.call({ action: 'admin.create', input: sampleInput() }).agreement.id;
+  signAs(b, b.tokenFrom(b.lastEmail('mia@example.com', 'invite')));
+  signAs(b, b.tokenFrom(b.lastEmail('tui@example.net', 'invite')), { typedName: 'tui SAMPLE' });   // both signed: waiting for the landlord
+  b.call({ action: 'admin.cancel', id, reason: 'Address wrong', notify: true, message: 'New one coming.' });
+  const m = b.lastEmail('mia@example.com', 'cancelled');
+  assert.ok(m && /that you signed has been cancelled before everyone signed it, so it won't go ahead and your signature won't be used/.test(m.text) && m.text.includes('New one coming.'));
+  assert.ok(!/please don't sign it/.test(m.text));
+  assert.ok(b.lastEmail('tui@example.net', 'cancelled'));
+  assert.deepEqual(b.db.audit[id].filter(e => e.type === 'CANCELLED')[0].details.notified, ['Tenant1', 'Tenant2']);
+});
